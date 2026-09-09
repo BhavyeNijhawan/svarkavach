@@ -72,7 +72,7 @@ _SCAM: List[Tuple[str, List[Tuple[str, str, str, List[Tuple[str, str]]]]]] = [
     ("kyc_freeze", [
         ("caller", "GREET", "hello main {bank} bank ke verification team se baat kar raha hoon",
          [("{bank} bank", "BANK_ENTITY")]),
-        ("callee", "VICTIM_QUESTION", "haan kya problem hai", []),
+        ("callee", "CONFIRM", "haan kya problem hai", []),
         ("caller", "PROBLEM_STATE", "aapke debit card par ek galat transaction hua hai",
          [("debit card", "BANK_ENTITY")]),
         ("caller", "DEADLINE", "agar {minutes} minute ke andar verify nahi kiya to card block ho jayega",
@@ -168,9 +168,9 @@ _BENIGN: List[Tuple[str, List[Tuple[str, str, str, List[Tuple[str, str]]]]]] = [
     ("bank_reminder", [
         ("caller", "GREET", "namaste main {bank} bank se bol raha hoon", [("{bank} bank", "BANK_ENTITY")]),
         ("caller", "INFORM", "aapka monthly statement email par bhej diya gaya hai", []),
-        ("caller", "REASSURE", "hum kabhi otp ya password nahi mangte",
+        ("caller", "INFORM", "hum kabhi otp ya password nahi mangte",
          [("otp", "OTP"), ("password", "PERSONAL_INFO_REQ")]),
-        ("callee", "VICTIM_COMPLY", "thik hai dhanyavaad", []),
+        ("callee", "CONFIRM", "thik hai dhanyavaad", []),
         ("caller", "CLOSE", "aapka din shubh ho dhanyavaad", []),
     ]),
     ("delivery_otp", [
@@ -191,7 +191,7 @@ _BENIGN: List[Tuple[str, List[Tuple[str, str, str, List[Tuple[str, str]]]]]] = [
         ("caller", "GREET", "namaste main city clinic se bol rahi hoon", []),
         ("caller", "INFORM", "kal shaam paanch baje aapka appointment hai", []),
         ("caller", "CONFIRM", "kya ye samay aapke liye sahi rahega", []),
-        ("callee", "VICTIM_COMPLY", "haan sahi hai", []),
+        ("callee", "CONFIRM", "haan sahi hai", []),
         ("caller", "CLOSE", "dhanyavaad kal milte hain", []),
     ]),
     ("customer_support", [
@@ -199,7 +199,7 @@ _BENIGN: List[Tuple[str, List[Tuple[str, str, str, List[Tuple[str, str]]]]]] = [
          [("{bank} bank", "BANK_ENTITY")]),
         ("callee", "INFORM", "meri netbanking login nahi ho rahi", [("netbanking", "BANK_ENTITY")]),
         ("caller", "INSTRUCT", "aap official website par login karo aur reset karo", []),
-        ("caller", "REASSURE", "hum aapse kabhi password nahi puchenge",
+        ("caller", "INFORM", "hum aapse kabhi password nahi puchenge",
          [("password", "PERSONAL_INFO_REQ")]),
         ("callee", "VICTIM_COMPLY", "thik hai main try karta hoon", []),
         ("caller", "CLOSE", "aur koi madad chahiye to bataiye dhanyavaad", []),
@@ -209,7 +209,7 @@ _BENIGN: List[Tuple[str, List[Tuple[str, str, str, List[Tuple[str, str]]]]]] = [
         ("caller", "INFORM", "isme sirf do minute lagenge aur koi jankari nahi chahiye", []),
         ("callee", "VICTIM_QUESTION", "kis cheez ka survey hai", []),
         ("caller", "INFORM", "hamari service ke baare me aapki ray chahiye", []),
-        ("callee", "VICTIM_COMPLY", "thik hai puchiye", []),
+        ("callee", "CONFIRM", "thik hai puchiye", []),
         ("caller", "CLOSE", "aapke samay ke liye dhanyavaad", []),
     ]),
 ]

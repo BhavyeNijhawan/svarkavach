@@ -68,7 +68,8 @@ _CLOSE_PHRASES = (("ho", "gaya", "ji"), ("kaam", "ho", "gaya"), ("bas", "itna"),
                   ("rakhti", "hoon"), ("phone", "rakh"), ("baat", "karte", "hain"))
 _SELF_ID = {"bol", "bolta", "bolti", "calling", "speaking", "department",
             "vibhag", "care", "support", "executive", "partner", "team",
-            "desk", "office", "wala", "wali"}
+            "desk", "office", "wala", "wali", "officer", "inspector",
+            "engineer", "manager", "agent", "representative"}
 _SELF_ID_PHRASES = (("bol", "raha", "hoon"), ("bol", "rahi", "hoon"),
                     ("baat", "kar", "raha"), ("baat", "kar", "rahi"),
                     ("call", "kar", "raha"), ("call", "kar", "rahi"),
@@ -86,6 +87,9 @@ _PROBLEM = {"problem", "dikkat", "pareshani", "samasya", "issue", "error", "pend
             "complaint", "mismatch", "expired", "overdue", "illegal", "unpaid",
             "defaulter", "bakaya", "notice", "reject", "kharab", "toot",
             "accident", "jhagde", "trafficking", "charge", "formality"}
+_PROBLEM_PHRASES = (("rok", "liya"), ("try", "hua"), ("valid", "nahi"),
+                    ("update", "nahi"), ("allowed", "nahi"), ("mila", "hai"),
+                    ("naam", "aa", "gaya"), ("use", "ho", "rahi"))
 #: Reassurance is a small set of explicit comfort moves plus the benign
 #: markers from the lexicon ("aap chahe to", "aapki marzi", "koi jaldi nahi").
 #: A statement that merely happens to be harmless is INFORM, not REASSURE.
@@ -119,7 +123,8 @@ _ESCALATE_PHRASES = (("last", "warning"), ("last", "chance"), ("decide", "nahi")
                      ("dobara", "nahi"), ("samajh", "nahi", "rahe"),
                      ("mat", "badalna"), ("reject", "kar"), ("close", "kar"),
                      ("shift", "khatam"), ("roz", "nahi"), ("chakkar", "kaatne"),
-                     ("teesri", "baar"), ("mujhe", "mat"))
+                     ("teesri", "baar"), ("mujhe", "mat"), ("jaldi", "kijiye"),
+                     ("jaldi", "karo"), ("jaldi", "kariye"), ("jaldi", "kar"))
 #: Terms in the threat table that name an institution rather than a
 #: consequence. "main police se bol raha hoon" is an authority claim, not a
 #: threat, and treating it as one puts the opening turn of a digital-arrest
@@ -197,7 +202,7 @@ def _has_clock(low: Sequence[str]) -> bool:
             return True
         if t.isdigit() and i + 1 < len(low) and low[i + 1] in _CLOCK_UNITS:
             return True
-    return _has(low, _CLOCK_WORDS) and _has(low, {"tak", "andar", "pehle", "baad"})
+    return _has(low, _CLOCK_WORDS) and _has(low, {"tak", "andar", "pehle", "baad", "ko"})
 
 
 def act_classifier(turn: Turn) -> str:
@@ -236,13 +241,14 @@ def act_classifier(turn: Turn) -> str:
             return "VICTIM_RESIST"
         if any(t.isdigit() for t in low) or _has_phrase(low, _COMPLY_PHRASES):
             return "VICTIM_COMPLY"
-        opener = low[1] if (low[0] in ("ji", "hmm", "hm") and len(low) > 1) else low[0]
-        if opener in _ACK_OPENERS and len(low) <= 11:
-            if _has(low, _BACKCHANNEL) or len(low) <= 5:
-                return "CONFIRM"
+        # An acknowledgement anywhere in the opening two tokens, since "ji" and
+        # "hmm" routinely precede the real particle ("ji, thik hai").
+        ack = bool(set(low[:2]) & _ACK_OPENERS)
+        if ack and len(low) <= 11 and (_has(low, _BACKCHANNEL) or len(low) <= 7):
+            return "CONFIRM"
         if "?" in low or _has(low, _WH):
             return "VICTIM_QUESTION"
-        if opener in _ACK_OPENERS:
+        if ack:
             return "VICTIM_COMPLY"
         if _has(low[:2], _GREET):
             return "GREET"
@@ -278,13 +284,20 @@ def act_classifier(turn: Turn) -> str:
         return "PRESSURE_ESCALATE"
 
     # Then the ordinary business of a phone call.
-    self_intro = _has(low, _FIRST_PERSON) and (
-        _has(low, _SELF_ID) or _has_phrase(low, _SELF_ID_PHRASES)
+    # Hindi drops the subject, so "Meena bol rahi hoon, Metro Bank se" is a
+    # self-introduction with no pronoun in it at all. The speaking phrase alone
+    # is enough; a pronoun plus a role word is the other way in.
+    named_self = any(
+        t in ("main", "mai") and i + 1 < len(tokens) and tokens[i + 1][:1].isupper()
+        for i, t in enumerate(low[:4])
+    )
+    self_intro = (
+        _has_phrase(low, _SELF_ID_PHRASES)
+        or named_self
+        or (_has(low, _FIRST_PERSON) and _has(low, _SELF_ID))
     )
     if "authority_copula" in kinds or _has(low, _AUTHORITY_WORDS):
-        if self_intro or turn.index <= 1:
-            return "IDENTIFY_SELF"
-        return "AUTHORITY_ASSERT"
+        return "IDENTIFY_SELF" if self_intro else "AUTHORITY_ASSERT"
     if _has(low[:3], _CLOSE) or _has_phrase(low, _CLOSE_PHRASES) or (
         _has(low, _CLOSE) and turn.index > 2
     ):
@@ -297,7 +310,7 @@ def act_classifier(turn: Turn) -> str:
         return "REASSURE"
     if _has(low, _INSTRUCT):
         return "INSTRUCT"
-    if _has(low, _PROBLEM):
+    if _has(low, _PROBLEM) or _has_phrase(low, _PROBLEM_PHRASES):
         return "PROBLEM_STATE"
     if _has(low, _SMALLTALK):
         return "SMALLTALK"

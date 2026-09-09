@@ -82,9 +82,12 @@ _IMPERATIVES = {
 }
 
 #: Single tokens that name information a genuine caller never asks for.
+#: "code" is here because the fraud scripts rarely say "OTP" out loud: they say
+#: verification code, security code, six digit code, SMS code. The gazetteer
+#: already treats those as OTP mentions and the constructions are identical.
 _SENSITIVE = {
     "otp", "cvv", "pin", "mpin", "password", "aadhaar", "aadhar", "pan",
-    "dob", "expiry", "passcode", "cpin",
+    "dob", "expiry", "passcode", "cpin", "code",
 }
 #: Multi-token variants of the same.
 _SENSITIVE_PHRASES = (

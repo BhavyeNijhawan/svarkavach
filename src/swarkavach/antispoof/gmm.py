@@ -31,7 +31,7 @@ Run the self-test with:
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Union
+from typing import Any, Dict, Iterable, Optional, Union
 
 import numpy as np
 

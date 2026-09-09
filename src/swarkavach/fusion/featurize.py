@@ -111,7 +111,16 @@ def _lexicon_turn_score(turn: Turn) -> float:
 #: during streaming. Below this the previous score is reused. Voice
 #: authenticity is a property of the speaker, not of the last half second, so
 #: re-running the detector on every turn buys nothing and costs a lot.
-VOICE_RESCORE_GAP_S = 2.5
+VOICE_RESCORE_GAP_S = 4.0
+
+#: Longest stretch of audio the voice branch looks at while streaming. Scoring
+#: the whole prefix every time makes a call quadratic in its own length: a 60
+#: second call ends up pushing about 12 minutes of audio through the front end.
+#: A trailing window keeps each re-score constant-cost, and it is arguably the
+#: better measurement anyway, since a spoofing artefact is a local property of
+#: the signal and averaging it over a long call only dilutes it. The batch
+#: path (cache=None) still scores the whole call in one pass.
+VOICE_WINDOW_S = 20.0
 
 
 def _score_voice(models: ModelBundle, audio: np.ndarray, sr: int,
@@ -124,7 +133,10 @@ def _score_voice(models: ModelBundle, audio: np.ndarray, sr: int,
     last = cache.get("voice_at_s", -1e9)
     if cache.get("voice") is not None and (dur - last) < VOICE_RESCORE_GAP_S:
         return cache["voice"]
-    bs = models.antispoof.score(audio, sr)
+
+    n_win = int(VOICE_WINDOW_S * sr)
+    clip = audio[-n_win:] if len(audio) > n_win else audio
+    bs = models.antispoof.score(clip, sr)
     cache["voice"] = bs
     cache["voice_at_s"] = dur
     return bs
