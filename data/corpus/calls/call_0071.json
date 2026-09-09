@@ -1,0 +1,371 @@
+{
+  "call_id": "call_0071",
+  "turns": [
+    {
+      "index": 0,
+      "speaker": "caller",
+      "text": "Haan hello, Reddy ji? Kaise ho?",
+      "act": "GREET",
+      "tokens": [
+        "Haan",
+        "hello",
+        ",",
+        "Reddy",
+        "ji",
+        "?",
+        "Kaise",
+        "ho",
+        "?"
+      ],
+      "bio": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "lang": [
+        "hi",
+        "univ",
+        "univ",
+        "en",
+        "univ",
+        "univ",
+        "hi",
+        "hi",
+        "univ"
+      ],
+      "t_start": 0.0,
+      "t_end": 3.842
+    },
+    {
+      "index": 1,
+      "speaker": "callee",
+      "text": "Haan ji, boliye.",
+      "act": "CONFIRM",
+      "tokens": [
+        "Haan",
+        "ji",
+        ",",
+        "boliye",
+        "."
+      ],
+      "bio": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "lang": [
+        "hi",
+        "univ",
+        "univ",
+        "hi",
+        "univ"
+      ],
+      "t_start": 4.092,
+      "t_end": 6.199
+    },
+    {
+      "index": 2,
+      "speaker": "caller",
+      "text": "Main hoon, Suresh, pehchana nahi kya?",
+      "act": "IDENTIFY_SELF",
+      "tokens": [
+        "Main",
+        "hoon",
+        ",",
+        "Suresh",
+        ",",
+        "pehchana",
+        "nahi",
+        "kya",
+        "?"
+      ],
+      "bio": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "lang": [
+        "hi",
+        "hi",
+        "univ",
+        "en",
+        "univ",
+        "hi",
+        "hi",
+        "hi",
+        "univ"
+      ],
+      "t_start": 6.449,
+      "t_end": 10.069
+    },
+    {
+      "index": 3,
+      "speaker": "caller",
+      "text": "Aapka bhai ki chhutti aaj shaam 6 baje se hai, sab aa jayenge.",
+      "act": "INFORM",
+      "tokens": [
+        "Aapka",
+        "bhai",
+        "ki",
+        "chhutti",
+        "aaj",
+        "shaam",
+        "6",
+        "baje",
+        "se",
+        "hai",
+        ",",
+        "sab",
+        "aa",
+        "jayenge",
+        "."
+      ],
+      "bio": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "lang": [
+        "hi",
+        "hi",
+        "hi",
+        "hi",
+        "hi",
+        "hi",
+        "univ",
+        "univ",
+        "hi",
+        "hi",
+        "univ",
+        "hi",
+        "hi",
+        "hi",
+        "univ"
+      ],
+      "t_start": 10.319,
+      "t_end": 16.446
+    },
+    {
+      "index": 4,
+      "speaker": "callee",
+      "text": "Ye online bhi ho jayega ya jaana padega?",
+      "act": "VICTIM_QUESTION",
+      "tokens": [
+        "Ye",
+        "online",
+        "bhi",
+        "ho",
+        "jayega",
+        "ya",
+        "jaana",
+        "padega",
+        "?"
+      ],
+      "bio": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "lang": [
+        "hi",
+        "en",
+        "hi",
+        "hi",
+        "hi",
+        "hi",
+        "hi",
+        "hi",
+        "univ"
+      ],
+      "t_start": 16.696,
+      "t_end": 20.607
+    },
+    {
+      "index": 5,
+      "speaker": "caller",
+      "text": "Aur sab thik? Ghar pe sab theek hain?",
+      "act": "SMALLTALK",
+      "tokens": [
+        "Aur",
+        "sab",
+        "thik",
+        "?",
+        "Ghar",
+        "pe",
+        "sab",
+        "theek",
+        "hain",
+        "?"
+      ],
+      "bio": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "lang": [
+        "hi",
+        "hi",
+        "hi",
+        "univ",
+        "hi",
+        "hi",
+        "hi",
+        "hi",
+        "hi",
+        "univ"
+      ],
+      "t_start": 20.857,
+      "t_end": 25.019
+    },
+    {
+      "index": 6,
+      "speaker": "callee",
+      "text": "Thik hai, aa jaunga main.",
+      "act": "CONFIRM",
+      "tokens": [
+        "Thik",
+        "hai",
+        ",",
+        "aa",
+        "jaunga",
+        "main",
+        "."
+      ],
+      "bio": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "lang": [
+        "hi",
+        "hi",
+        "univ",
+        "hi",
+        "hi",
+        "hi",
+        "univ"
+      ],
+      "t_start": 25.269,
+      "t_end": 28.192
+    },
+    {
+      "index": 7,
+      "speaker": "caller",
+      "text": "Achha chalo rakhta hoon, khana khaakar so jana.",
+      "act": "CLOSE",
+      "tokens": [
+        "Achha",
+        "chalo",
+        "rakhta",
+        "hoon",
+        ",",
+        "khana",
+        "khaakar",
+        "so",
+        "jana",
+        "."
+      ],
+      "bio": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "lang": [
+        "hi",
+        "hi",
+        "hi",
+        "hi",
+        "univ",
+        "hi",
+        "hi",
+        "en",
+        "hi",
+        "univ"
+      ],
+      "t_start": 28.442,
+      "t_end": 32.45
+    }
+  ],
+  "label_scam": 0,
+  "label_voice": "synthetic",
+  "scenario": "family_call",
+  "speaker_id": "spk_16",
+  "split": "train",
+  "audio_path": null,
+  "sample_rate": 8000,
+  "channel": "clean",
+  "audio_source": "none",
+  "meta": {
+    "arc": "GREET CONFIRM IDENTIFY_SELF INFORM VICTIM_QUESTION SMALLTALK:caller CONFIRM CLOSE",
+    "style": "flat",
+    "templates": [
+      "family_call/GREET/1",
+      "shared/CONFIRM/2",
+      "family_call/IDENTIFY_SELF/0",
+      "family_call/INFORM/1",
+      "shared/VICTIM_QUESTION/2",
+      "family_call/SMALLTALK/0",
+      "shared/CONFIRM/5",
+      "family_call/CLOSE/0"
+    ],
+    "slots": {
+      "CUST": "Reddy ji",
+      "NAME": "Suresh",
+      "RELATIVE": "aapka bhai"
+    },
+    "hard_negative": false,
+    "mild_scam": false,
+    "timing_source": "estimated"
+  },
+  "schema_version": "1.0"
+}

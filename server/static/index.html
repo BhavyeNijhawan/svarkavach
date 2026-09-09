@@ -1,0 +1,449 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SwarKavach Console</title>
+<link rel="stylesheet" href="/static/css/app.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%233987e5'/><path d='M16 6l8 3v7c0 5-3.4 8.6-8 10-4.6-1.4-8-5-8-10V9z' fill='none' stroke='white' stroke-width='2.2' stroke-linejoin='round'/></svg>">
+</head>
+<body>
+
+<div class="app">
+
+  <!-- ------------------------------------------------------------ rail -->
+  <aside class="rail">
+    <div class="brand">
+      <div class="brand-mark">
+        <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linejoin="round">
+          <path d="M12 3l7 2.6v6.1c0 4.3-2.9 7.4-7 8.8-4.1-1.4-7-4.5-7-8.8V5.6z"/>
+          <path d="M9.2 11.8l2 2 3.6-3.9" stroke-linecap="round"/>
+        </svg>
+      </div>
+      <div class="brand-text">
+        <div class="name">SwarKavach</div>
+        <div class="sub">fraud call console</div>
+      </div>
+    </div>
+
+    <nav class="nav" id="nav">
+      <div class="nav-label">Operate</div>
+      <button class="nav-item" data-view="monitor" aria-current="page">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 12h3l2.5-7 4 14 2.5-7H21"/></svg>
+        Live monitor
+      </button>
+      <button class="nav-item" data-view="analysis">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.6-3.6"/></svg>
+        Call analysis
+      </button>
+
+      <div class="nav-label">Evidence</div>
+      <button class="nav-item" data-view="results">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>
+        Results lab
+      </button>
+      <button class="nav-item" data-view="corpus">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M4 5.5C4 4.7 4.7 4 5.5 4H11v16H5.5A1.5 1.5 0 0 1 4 18.5z"/><path d="M20 5.5c0-.8-.7-1.5-1.5-1.5H13v16h5.5a1.5 1.5 0 0 0 1.5-1.5z"/></svg>
+        Corpus
+      </button>
+
+      <div class="nav-label">Reference</div>
+      <button class="nav-item" data-view="system">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
+        System
+      </button>
+    </nav>
+
+    <div class="rail-foot">
+      <div class="row between">
+        <span>Engine</span>
+        <span id="engine-status" class="badge neutral"><span class="dot"></span>checking</span>
+      </div>
+      <div class="row between">
+        <span>Theme</span>
+        <button class="btn ghost sm" id="theme-toggle" title="Switch light and dark">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="4.2"/><path d="M12 2v2M12 20v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M2 12h2M20 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+      <div class="xs muted" style="line-height:1.45">
+        BCSE419L lab assessment 2<br>Bhavye Nijhawan, 23BAI0100
+      </div>
+    </div>
+  </aside>
+
+  <!-- ------------------------------------------------------------ main -->
+  <main class="main">
+    <header class="topbar">
+      <h1 id="view-title">Live monitor</h1>
+      <span class="badge neutral" id="view-sub"><span class="dot"></span>streaming risk, turn by turn</span>
+      <span class="spacer"></span>
+      <span class="xs muted mono" id="build-info"></span>
+    </header>
+
+    <!-- =========================================== VIEW: live monitor -->
+    <section class="view active" id="view-monitor">
+      <div class="card mb">
+        <div class="toolbar">
+          <div class="field" style="min-width:260px">
+            <label for="mon-call">Call under analysis</label>
+            <select id="mon-call"></select>
+          </div>
+          <div class="field" style="width:140px">
+            <label for="mon-speed">Replay speed</label>
+            <select id="mon-speed">
+              <option value="1">Real time</option>
+              <option value="2" selected>2x</option>
+              <option value="4">4x</option>
+              <option value="8">8x</option>
+            </select>
+          </div>
+          <div class="field" style="width:150px">
+            <label for="mon-codec">Channel</label>
+            <select id="mon-codec">
+              <option value="clean">Clean</option>
+              <option value="g711u" selected>G.711 mu-law</option>
+              <option value="g711a">G.711 A-law</option>
+              <option value="gsm">GSM</option>
+              <option value="amrnb">AMR-NB</option>
+            </select>
+          </div>
+          <span class="spacer"></span>
+          <button class="btn" id="mon-new">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 5v6h-6"/></svg>
+            Synthesise a new call
+          </button>
+          <button class="btn primary" id="mon-run">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.2v13.6L19 12z"/></svg>
+            Start call
+          </button>
+        </div>
+
+        <div class="card-body" style="padding-bottom:6px">
+          <div class="grid g-2-1">
+            <div>
+              <div class="wave-wrap" id="mon-wave" style="height:88px">
+                <canvas id="mon-wave-canvas" height="88"></canvas>
+                <div class="playhead" id="mon-playhead" style="left:0; display:none"></div>
+              </div>
+              <div class="row between xs muted mt" style="margin-top:8px">
+                <span id="mon-clock" class="mono">0.0s</span>
+                <span id="mon-channel-note"></span>
+                <span id="mon-duration" class="mono">0.0s</span>
+              </div>
+            </div>
+            <div>
+              <div class="row" style="gap:14px; align-items:flex-start">
+                <div id="mon-gauge"></div>
+                <div class="col" style="flex:1; gap:12px; min-width:0">
+                  <div id="mon-meters" class="col" style="gap:11px"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid g-2-1">
+        <div class="card">
+          <div class="card-head">
+            <h2>Conversation</h2>
+            <span class="hint">entities highlighted as they are detected</span>
+            <span class="spacer"></span>
+            <span id="mon-live" class="badge neutral"><span class="dot"></span>idle</span>
+          </div>
+          <div class="card-body scroll-y" id="mon-transcript" style="max-height:460px">
+            <div class="empty">Pick a call and press Start.</div>
+          </div>
+        </div>
+
+        <div class="col">
+          <div class="card">
+            <div class="card-head"><h2>Risk trajectory</h2></div>
+            <div class="card-body tight"><div id="mon-traj" style="height:190px"></div></div>
+          </div>
+          <div class="card">
+            <div class="card-head">
+              <h2>Detection latency</h2>
+              <span class="spacer"></span>
+              <span class="hint">time to alert</span>
+            </div>
+            <div class="card-body">
+              <div class="grid g2" style="gap:10px">
+                <div class="stat" style="border:none;padding:0">
+                  <span class="k">Alert raised at</span>
+                  <span class="v sm" id="mon-ttd">--</span>
+                  <span class="d" id="mon-ttd-turn">not yet triggered</span>
+                </div>
+                <div class="stat" style="border:none;padding:0">
+                  <span class="k">Ground truth</span>
+                  <span class="v sm" id="mon-truth">--</span>
+                  <span class="d" id="mon-truth-note"></span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-head"><h2>Live evidence</h2></div>
+            <div class="card-body" id="mon-reasons">
+              <div class="empty" style="padding:22px">Nothing flagged yet.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========================================= VIEW: call analysis -->
+    <section class="view" id="view-analysis">
+      <div class="card mb">
+        <div class="toolbar">
+          <div class="field" style="min-width:280px">
+            <label for="an-call">Call</label>
+            <select id="an-call"></select>
+          </div>
+          <div class="field" style="width:150px">
+            <label for="an-codec">Channel condition</label>
+            <select id="an-codec">
+              <option value="clean">Clean</option>
+              <option value="g711u" selected>G.711 mu-law</option>
+              <option value="g711a">G.711 A-law</option>
+              <option value="gsm">GSM</option>
+              <option value="amrnb">AMR-NB</option>
+            </select>
+          </div>
+          <div class="field" style="width:140px">
+            <label for="an-snr">Added noise</label>
+            <select id="an-snr">
+              <option value="">None</option>
+              <option value="20">Babble 20 dB</option>
+              <option value="10">Babble 10 dB</option>
+              <option value="5">Babble 5 dB</option>
+            </select>
+          </div>
+          <span class="spacer"></span>
+          <label class="btn" for="an-upload" style="cursor:pointer">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4"/><path d="M7.5 8.5L12 4l4.5 4.5"/><path d="M4 16v3.5A1.5 1.5 0 0 0 5.5 21h13a1.5 1.5 0 0 0 1.5-1.5V16"/></svg>
+            Upload WAV
+          </label>
+          <input id="an-upload" type="file" accept=".wav,audio/wav" hidden>
+          <button class="btn primary" id="an-run">Analyse</button>
+        </div>
+      </div>
+
+      <div class="grid g4 mb" id="an-tiles"></div>
+
+      <div class="grid g-2-1 mb">
+        <div class="card">
+          <div class="card-head">
+            <h2>Transcript with evidence spans</h2>
+            <span class="spacer"></span>
+            <span class="hint" id="an-src"></span>
+          </div>
+          <div class="card-body scroll-y" id="an-transcript" style="max-height:520px">
+            <div class="empty">Run an analysis to see the transcript.</div>
+          </div>
+        </div>
+        <div class="col">
+          <div class="card">
+            <div class="card-head"><h2>Verdict</h2></div>
+            <div class="card-body">
+              <div class="row" style="gap:16px; align-items:flex-start">
+                <div id="an-gauge"></div>
+                <div class="col" style="flex:1; min-width:0; gap:11px" id="an-meters"></div>
+              </div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-head"><h2>Why</h2><span class="spacer"></span><span class="hint">plain language</span></div>
+            <div class="card-body" id="an-reasons"><div class="empty" style="padding:20px">No analysis yet.</div></div>
+          </div>
+          <div class="card">
+            <div class="card-head"><h2>Detected entities</h2></div>
+            <div class="card-body row wrap" id="an-entities" style="gap:6px"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid g2 mb">
+        <div class="card">
+          <div class="card-head">
+            <h2>Feature contributions</h2>
+            <span class="spacer"></span>
+            <span class="hint">exact Shapley values, log-odds scale</span>
+          </div>
+          <div class="card-body tight"><div id="an-shap"></div></div>
+        </div>
+        <div class="card">
+          <div class="card-head">
+            <h2>Prosody against lexical pressure</h2>
+            <span class="spacer"></span>
+            <span class="hint">the cross-modal check</span>
+          </div>
+          <div class="card-body tight"><div id="an-pim" style="height:250px"></div></div>
+        </div>
+      </div>
+
+      <div class="grid g2">
+        <div class="card">
+          <div class="card-head"><h2>Spectrogram</h2><span class="spacer"></span><span class="hint">8 kHz telephone band</span></div>
+          <div class="card-body tight">
+            <div class="wave-wrap"><canvas id="an-spec" height="180"></canvas></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>Voice-quality profile</h2><span class="spacer"></span><span class="hint">this call against corpus means</span></div>
+          <div class="card-body center"><div id="an-radar"></div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================ VIEW: results lab -->
+    <section class="view" id="view-results">
+      <div id="results-empty" class="card mb" hidden>
+        <div class="card-body">
+          <div class="banner warn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M12 8v5"/><circle cx="12" cy="16.5" r=".6" fill="currentColor"/><path d="M10.3 3.9L2.7 17a2 2 0 0 0 1.7 3h15.2a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>
+            <div>No evaluation results on disk yet. Run <code>swarkavach evaluate</code> from the project root, or open the Colab notebooks and drop the exported JSON into <code>data/results/</code>.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid g4 mb" id="res-tiles"></div>
+
+      <div class="card mb">
+        <div class="card-head">
+          <h2>Headline ablation: which branch catches which call</h2>
+          <span class="spacer"></span>
+          <span class="hint">detection rate per evaluation cell, held-out test split</span>
+        </div>
+        <div class="card-body">
+          <div id="res-ablation-heat" class="mb"></div>
+          <div class="tbl-wrap"><table class="tbl" id="res-ablation-tbl"></table></div>
+        </div>
+      </div>
+
+      <div class="grid g2 mb">
+        <div class="card">
+          <div class="card-head"><h2>Anti-spoofing: feature set against model</h2><span class="spacer"></span><span class="hint">equal error rate, lower is better</span></div>
+          <div class="card-body"><div id="res-as-heat"></div></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>Detection error tradeoff</h2></div>
+          <div class="card-body tight"><div id="res-det" style="height:280px"></div></div>
+        </div>
+      </div>
+
+      <div class="grid g2 mb">
+        <div class="card">
+          <div class="card-head"><h2>Entity recognition</h2><span class="spacer"></span><span class="hint">entity-level F1, exact span match</span></div>
+          <div class="card-body"><div id="res-ner" style="height:250px"></div>
+            <div class="tbl-wrap mt"><table class="tbl" id="res-ner-tbl"></table></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>Intent classification</h2></div>
+          <div class="card-body"><div id="res-intent" style="height:250px"></div>
+            <div class="tbl-wrap mt"><table class="tbl" id="res-intent-tbl"></table></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid g2 mb">
+        <div class="card">
+          <div class="card-head"><h2>Channel robustness</h2><span class="spacer"></span><span class="hint">end-to-end AUC per codec</span></div>
+          <div class="card-body"><div id="res-robust" style="height:260px"></div></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>Time to detection</h2><span class="spacer"></span><span class="hint">seconds of call heard before the alert</span></div>
+          <div class="card-body"><div id="res-ttd" style="height:260px"></div></div>
+        </div>
+      </div>
+
+      <div class="grid g2">
+        <div class="card">
+          <div class="card-head"><h2>Calibration</h2><span class="spacer"></span><span class="hint">predicted against observed fraud rate</span></div>
+          <div class="card-body tight"><div id="res-calib" style="height:270px"></div></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>Provenance</h2><span class="spacer"></span><span class="hint">where each number came from</span></div>
+          <div class="card-body"><div class="tbl-wrap"><table class="tbl" id="res-prov"></table></div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================================================= VIEW: corpus -->
+    <section class="view" id="view-corpus">
+      <div class="grid g4 mb" id="cor-tiles"></div>
+      <div class="grid g-1-2 mb">
+        <div class="card">
+          <div class="card-head"><h2>Evaluation grid</h2><span class="spacer"></span><span class="hint">calls per cell</span></div>
+          <div class="card-body"><div id="cor-cells"></div></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>Entities by type</h2></div>
+          <div class="card-body"><div id="cor-entities" style="height:236px"></div></div>
+        </div>
+      </div>
+      <div class="grid g2 mb">
+        <div class="card">
+          <div class="card-head"><h2>Scenarios</h2></div>
+          <div class="card-body"><div id="cor-scenarios" style="height:300px"></div></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>Code mixing</h2><span class="spacer"></span><span class="hint">how Hindi and English divide the work</span></div>
+          <div class="card-body"><div id="cor-cmi" style="height:300px"></div></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-head">
+          <h2>Call browser</h2>
+          <span class="spacer"></span>
+          <input type="text" id="cor-filter" placeholder="Filter by id, scenario or cell" style="width:250px">
+        </div>
+        <div class="card-body tight scroll-y" style="max-height:440px">
+          <div class="tbl-wrap"><table class="tbl" id="cor-table"></table></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================================================= VIEW: system -->
+    <section class="view" id="view-system">
+      <div class="grid g-2-1">
+        <div class="col">
+          <div class="card">
+            <div class="card-head"><h2>How a call moves through the system</h2></div>
+            <div class="card-body" id="sys-arch"></div>
+          </div>
+          <div class="card">
+            <div class="card-head"><h2>What is new here</h2></div>
+            <div class="card-body prose" id="sys-novelty"></div>
+          </div>
+          <div class="card">
+            <div class="card-head"><h2>Ethics and limits</h2></div>
+            <div class="card-body prose" id="sys-ethics"></div>
+          </div>
+        </div>
+        <div class="col">
+          <div class="card">
+            <div class="card-head"><h2>Runtime</h2></div>
+            <div class="card-body"><dl class="kv" id="sys-runtime"></dl></div>
+          </div>
+          <div class="card">
+            <div class="card-head"><h2>Fusion features</h2><span class="spacer"></span><span class="hint">25 inputs</span></div>
+            <div class="card-body tight scroll-y" style="max-height:420px">
+              <div class="tbl-wrap"><table class="tbl" id="sys-features"></table></div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-head"><h2>Syllabus coverage</h2></div>
+            <div class="card-body tight"><div class="tbl-wrap"><table class="tbl" id="sys-syllabus"></table></div></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<script type="module" src="/static/js/app.js"></script>
+</body>
+</html>

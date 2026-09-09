@@ -1,0 +1,110 @@
+{
+  "n_calls": 120,
+  "n_turns": 1255,
+  "n_tokens": 15429,
+  "n_entities": 306,
+  "n_scam": 60,
+  "n_benign": 60,
+  "n_hard_negatives": 38,
+  "n_mild_scams": 13,
+  "entities": {
+    "OTP": 33,
+    "BANK_ENTITY": 78,
+    "AUTHORITY_CLAIM": 31,
+    "THREAT_DEADLINE": 77,
+    "PAYMENT_HANDLE": 25,
+    "PERSONAL_INFO_REQ": 24,
+    "MONEY_AMOUNT": 38
+  },
+  "acts": {
+    "AUTHORITY_ASSERT": 19,
+    "CLOSE": 120,
+    "CONFIRM": 175,
+    "DEADLINE": 39,
+    "GREET": 120,
+    "IDENTIFY_SELF": 115,
+    "INFORM": 122,
+    "INSTRUCT": 49,
+    "ISOLATE": 25,
+    "PRESSURE_ESCALATE": 44,
+    "PROBLEM_STATE": 47,
+    "REASSURE": 80,
+    "REQUEST_SENSITIVE": 67,
+    "SMALLTALK": 13,
+    "THREAT": 34,
+    "VICTIM_COMPLY": 50,
+    "VICTIM_QUESTION": 91,
+    "VICTIM_RESIST": 45
+  },
+  "scenarios": {
+    "appointment_reminder": 7,
+    "bank_reminder": 9,
+    "courier_customs": 5,
+    "customer_support": 7,
+    "delivery_otp": 7,
+    "digital_arrest": 7,
+    "electricity_disconnect": 6,
+    "fake_relative": 7,
+    "family_call": 8,
+    "job_offer": 5,
+    "kyc_freeze": 7,
+    "loan_approval": 5,
+    "lottery_prize": 7,
+    "otp_theft": 6,
+    "school_notice": 7,
+    "sim_block": 5,
+    "survey_call": 7,
+    "telemarketing": 8
+  },
+  "cells": {
+    "clonedxbenign": 30,
+    "clonedxscam": 30,
+    "humanxbenign": 30,
+    "humanxscam": 30
+  },
+  "cells_by_split": {
+    "dev": {
+      "clonedxbenign": 4,
+      "clonedxscam": 4,
+      "humanxbenign": 5,
+      "humanxscam": 5
+    },
+    "test": {
+      "clonedxbenign": 8,
+      "clonedxscam": 8,
+      "humanxbenign": 7,
+      "humanxscam": 7
+    },
+    "train": {
+      "clonedxbenign": 18,
+      "clonedxscam": 18,
+      "humanxbenign": 18,
+      "humanxscam": 18
+    }
+  },
+  "splits": {
+    "dev": 18,
+    "test": 30,
+    "train": 72
+  },
+  "speakers_per_split": {
+    "dev": 4,
+    "test": 6,
+    "train": 14
+  },
+  "lang_tokens": {
+    "en": 2238,
+    "hi": 8643,
+    "univ": 4548
+  },
+  "mean_cmi": 20.227,
+  "switch_points": 3191,
+  "mean_turns_per_call": 10.458,
+  "mean_tokens_per_turn": 12.294,
+  "mean_duration_s": 54.689,
+  "total_duration_s": 6562.679,
+  "mean_coercion": {
+    "scam": 0.3501,
+    "benign": 0.1468
+  }
+}

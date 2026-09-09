@@ -1,0 +1,15 @@
+# SwarKavach - local (CPU, laptop) requirements
+# Deliberately small. Everything heavy is Colab-only (see requirements-colab.txt).
+numpy>=1.26
+scipy>=1.11
+scikit-learn>=1.4
+pandas>=2.0
+matplotlib>=3.7
+torch>=2.1
+Flask>=3.0
+PyYAML>=6.0
+typer>=0.9
+rich>=13.0
+tqdm>=4.66
+joblib>=1.3
+soundfile>=0.12        # optional, stdlib `wave` fallback exists

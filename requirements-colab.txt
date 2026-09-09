@@ -1,0 +1,11 @@
+# SwarKavach - Colab / GPU requirements (heavy stack, do not install on the laptop)
+-r requirements.txt
+openai-whisper>=20231117
+transformers>=4.40
+datasets>=2.18
+sentencepiece
+accelerate
+sklearn-crfsuite>=0.3.6
+seaborn
+librosa>=0.10          # cross-check only; our DSP is self-implemented
+edge-tts>=6.1          # free neural TTS for synthetic-voice cells

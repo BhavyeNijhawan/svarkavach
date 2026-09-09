@@ -1,0 +1,28 @@
+# environments
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# heavy data: never commit
+data/raw/
+data/corpus/audio/
+data/models/*.pt
+data/models/*.joblib
+data/models/*.npz
+*.wav
+*.flac
+*.mp3
+
+# keep these
+!data/corpus/.gitkeep
+!data/models/.gitkeep
+!data/results/.gitkeep
+!docs/assets/*.wav
+
+# os
+Thumbs.db
+.DS_Store
+desktop.ini
