@@ -410,13 +410,43 @@ def _eval_antispoof(p, calls: Sequence[Call], codecs: Sequence[str], say) -> Opt
         say(f"  anti-spoof modules unavailable: {exc}")
         return None
 
-    with_audio = [c for c in calls if c.audio_path and Path(c.audio_path).exists()]
-    if len(with_audio) < 8:
-        say("  not enough calls with audio")
-        return None
+    # Prefer the real paired set. Reporting an anti-spoofing EER on the
+    # generated corpus would be measuring a machine against another machine,
+    # since both sides of its human-against-cloned axis are synthesised. The
+    # pairs are real human telephone speech against a rendering of the same
+    # transcript, with the channel matched, so an EER on them means what the
+    # word usually means. Split is speaker disjoint and comes from the pairs.
+    source = "generated_corpus"
+    pair_calls: List[Call] = []
+    try:
+        from .datasets import antispoof_pairs_as_calls, load_antispoof_pairs
 
-    train_calls = [c for c in p.calls if c.split == "train"
-                   and c.audio_path and Path(c.audio_path).exists()]
+        pair_calls = antispoof_pairs_as_calls()
+    except Exception as exc:
+        say(f"  real pairs unavailable: {exc}")
+
+    audit: Dict[str, Any] = {}
+    if len(pair_calls) >= 40:
+        source = "real_pairs"
+        audit = (load_antispoof_pairs() or {}).get("confound_audit", {}) or {}
+        train_calls = [c for c in pair_calls if c.split == "train"]
+        with_audio = [c for c in pair_calls if c.split == "dev"]
+        say(f"  using {len(train_calls)} train and {len(with_audio)} held-out "
+            f"real paired utterances")
+        if audit.get("worst_auc", 0) > 0.75:
+            say(f"  WARNING: the pair set fails its channel audit "
+                f"(worst AUC {audit['worst_auc']}), so this EER is not "
+                f"trustworthy. Rebuild with: swarkavach fetch-data")
+    else:
+        with_audio = [c for c in calls if c.audio_path and Path(c.audio_path).exists()]
+        train_calls = [c for c in p.calls if c.split == "train"
+                       and c.audio_path and Path(c.audio_path).exists()]
+        say("  no real pairs on disk, falling back to the generated corpus "
+            "(this measures machine against machine)")
+
+    if len(with_audio) < 8 or len(train_calls) < 8:
+        say("  not enough audio to evaluate the voice branch")
+        return None
     feature_sets = ["lfcc", "gfcc", "mfcc", "cqcc", "lpcc"]
     models = ["gmm", "gbm"]
     eer_tbl: Dict[str, Dict[str, Dict[str, Optional[float]]]] = {}
@@ -548,6 +578,13 @@ def _eval_antispoof(p, calls: Sequence[Call], codecs: Sequence[str], say) -> Opt
         "default_condition": "clean", "eer": eer_tbl, "min_tdcf": tdcf_tbl,
         "det": det_store, "n_train": len(audio_train), "n_test": len(with_audio),
         "note": "min_tdcf here is a cost-weighted operating point with the ASV stage fixed",
+        "evaluated_on": source,
+        "evaluated_on_note": (
+            "real human telephone speech against a neural rendering of the same "
+            "transcript, channel matched" if source == "real_pairs" else
+            "the generated corpus, where both classes are machine generated, so "
+            "this measures vocoder artefacts rather than human against machine"),
+        "channel_audit": audit,
         "generated": _now(),
     }
 
