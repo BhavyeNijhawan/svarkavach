@@ -181,39 +181,61 @@ def _render_sapi(call: Call, sr: int) -> Tuple[List[np.ndarray], Dict[str, Any]]
     return segments, {"voices": len(voices)}
 
 
-def _render_edge(call: Call, sr: int) -> Tuple[List[np.ndarray], Dict[str, Any]]:
-    """edge-tts. Needs a network connection, so nothing calls this by default."""
-    import asyncio
+def _render_edge(call: Call, sr: int, seed: int = 0) -> Tuple[List[np.ndarray], Dict[str, Any]]:
+    """Real neural voices from Microsoft Edge. Needs a network connection.
 
-    import edge_tts  # type: ignore
+    This is what makes the audio say the words on the screen. The `sim` back
+    end produces the right acoustic statistics but no intelligible speech,
+    which is fine for training a detector and useless for a demo.
 
-    caller = "hi-IN-MadhurNeural"
-    callee = "hi-IN-SwaraNeural"
+    The cloned cells run through an LPC vocoder re-synthesis on the CALLER's
+    turns only, since it is the caller whose voice is supposedly cloned. That
+    imposes the low jitter, low shimmer and high harmonic-to-noise ratio that
+    real vocoder-based cloning leaves, while keeping the words intelligible.
+    Both classes are machine generated here, so see the module docstring in
+    neural_tts.py for what the local anti-spoofing numbers do and do not mean.
+    """
+    from . import neural_tts as N
+
+    caller_v = N.voice_for_speaker(call.speaker_id, seed)
+    callee_v = N.voice_for_speaker(f"{call.speaker_id}_callee", seed)
+    caller_is_synthetic = call.label_voice == "synthetic"
+
+    items = []
+    for turn in call.turns:
+        v = caller_v if turn.speaker == "caller" else callee_v
+        items.append((N.prepare_text(turn.text, v["script"]),
+                      v["voice"], v["rate"], v["pitch"]))
+
+    rendered = N.synth_batch(items, sr=sr)
+    n_failed = sum(1 for r in rendered if r is None)
+
     segments: List[np.ndarray] = []
-    tmpdir = Path(tempfile.mkdtemp(prefix="swarkavach_edge_"))
+    per_turn: List[Dict[str, Any]] = []
+    for turn, seg in zip(call.turns, rendered):
+        if seg is None:
+            # a dropped request must not shift every later turn's timing, so
+            # it becomes a short silence rather than disappearing
+            seg = np.zeros(int(0.5 * sr), dtype=np.float32)
+        is_caller = turn.speaker == "caller"
+        vocoded = bool(caller_is_synthetic and is_caller)
+        if vocoded:
+            seg = N.vocoder_artifacts(seg, sr)
+        segments.append(rms_normalize(np.asarray(seg, dtype=np.float32), target_dbfs=-20.0))
+        per_turn.append({
+            "index": turn.index, "speaker": turn.speaker,
+            "synthetic": vocoded, "n_samples": int(segments[-1].size),
+        })
 
-    async def _one(text: str, voice: str, path: Path) -> None:
-        await edge_tts.Communicate(text, voice).save(str(path))
-
-    try:
-        for turn in call.turns:
-            path = tmpdir / f"turn_{turn.index:03d}.mp3"
-            asyncio.run(
-                _one(turn.text, caller if turn.speaker == "caller" else callee, path)
-            )
-            x, _ = read_audio(path, sr=sr)
-            segments.append(rms_normalize(x, target_dbfs=-20.0))
-    finally:
-        for p in tmpdir.glob("*"):
-            try:
-                p.unlink()
-            except OSError:  # pragma: no cover
-                pass
-        try:
-            tmpdir.rmdir()
-        except OSError:  # pragma: no cover
-            pass
-    return segments, {"caller_voice": caller, "callee_voice": callee}
+    return segments, {
+        "caller_voice": {k: caller_v[k] for k in ("voice", "rate", "pitch", "script")},
+        "callee_voice": {k: callee_v[k] for k in ("voice", "rate", "pitch", "script")},
+        "caller_synthetic": bool(caller_is_synthetic),
+        "cloned_via": "lpc_vocoder_resynthesis" if caller_is_synthetic else None,
+        "turns": per_turn,
+        "n_failed": n_failed,
+        "errors": list(N.FAILURES)[:3],
+    }
 
 
 # --------------------------------------------------------------------------
@@ -258,7 +280,7 @@ def render_call_audio(
             if backend == "sapi":
                 segments, detail = _render_sapi(call, sr)
             else:
-                segments, detail = _render_edge(call, sr)
+                segments, detail = _render_edge(call, sr, seed)
         except Exception as exc:  # any optional back end may fail at runtime
             fallback_reason = f"{backend} failed: {exc}"
             backend = "sim"

@@ -53,7 +53,21 @@ def det_curve(scores: Sequence[float], labels: Sequence[int]) -> Tuple[np.ndarra
 
     tp = np.cumsum(y == 1)
     fp = np.cumsum(y == 0)
-    # at each threshold: everything above it is called positive
+
+    # Collapse ties. Walking through a group of equal scores one sample at a
+    # time invents operating points that no threshold can actually reach, and
+    # then the EER search picks one of them. Measured on a real run where the
+    # detector produced only two distinct probabilities, that reported an EER
+    # of 0.1339 where the best achievable was 0.0625, and simply reordering
+    # tied samples moved the reported figure between 0.0 and 0.1339 without
+    # changing the scores at all. Keeping only the last index of each run of
+    # equal scores leaves exactly the reachable operating points.
+    keep = np.ones(s.size, dtype=bool)
+    if s.size > 1:
+        keep[:-1] = s[:-1] != s[1:]
+    tp, fp, s = tp[keep], fp[keep], s[keep]
+
+    # at each threshold: everything at or above it is called positive
     fnr = 1.0 - tp / n_pos          # misses
     fpr = fp / n_neg                # false alarms
     fnr = np.concatenate(([1.0], fnr))
@@ -482,28 +496,28 @@ def _eval_antispoof(p, calls: Sequence[Call], codecs: Sequence[str], say) -> Opt
     for codec in codecs:
         X_te, y_te = test_audio(codec)
         if len(set(y_te.tolist())) < 2:
-            for fs, models in models_by_fs.items():
-                for mname in models:
+            for fs, fs_models in models_by_fs.items():
+                for mname in fs_models:
                     eer_tbl[fs][mname][codec] = None
                     tdcf_tbl[fs][mname][codec] = None
             continue
-        for fs, models in models_by_fs.items():
-            if not models:
+        for fs, fs_models in models_by_fs.items():
+            if not fs_models:
                 continue
             try:
-                need_frames = "gmm" in models
+                need_frames = "gmm" in fs_models
                 F_utt = (np.asarray([utterance_features(x, sr, fs) for x, sr in X_te])
-                         if "gbm" in models else None)
+                         if "gbm" in fs_models else None)
                 F_frames = ([_frame_features(x, sr, fs) for x, sr in X_te]
                             if need_frames else None)
             except Exception as exc:
                 say(f"  {fs}/{codec} extraction failed: {exc}")
-                for mname in models:
+                for mname in fs_models:
                     eer_tbl[fs][mname][codec] = None
                     tdcf_tbl[fs][mname][codec] = None
                 continue
 
-            for mname, model in models.items():
+            for mname, model in fs_models.items():
                 try:
                     if mname == "gmm":
                         s = np.array([float(model.llr(F)) for F in F_frames])
@@ -565,8 +579,11 @@ def _eval_ner(p, calls: Sequence[Call], say) -> Optional[Dict[str, Any]]:
             if src == "asr":
                 try:
                     from .text.asr import ASR
-                    asr = ASR()
-                    if asr.backend not in ("whisper",):
+                    # resolve(), not .backend: the wrong attribute raised into
+                    # the except below and skipped this row unconditionally,
+                    # while the JSON still advertised an "asr" column, so the
+                    # console drew a missing measurement as a real 0.00.
+                    if "whisper" not in str(ASR().resolve()).lower():
                         continue          # nothing to degrade, skip honestly
                 except Exception:
                     continue

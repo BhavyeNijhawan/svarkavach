@@ -157,7 +157,13 @@ SETTINGS = Settings()
 DEFAULT_N_CALLS = 480
 DEFAULT_SCAM_RATIO = 0.5
 DEFAULT_SYNTHETIC_RATIO = 0.5
-DEFAULT_SPLIT = {"train": 0.60, "dev": 0.15, "test": 0.25}
+#: The fusion layer is a stacked model: it consumes the branch outputs, so
+#: fitting it on rows the branches were themselves trained on means fitting
+#: it to in-sample branch predictions that never occur at test time.
+#: Measured, CRF entity F1 was 1.000 on those rows against 0.887 on test.
+#: So branches train on `train`, the fusion trains on `dev`, and `dev` is
+#: sized large enough to fit 25 features rather than left as a token slice.
+DEFAULT_SPLIT = {"train": 0.50, "dev": 0.25, "test": 0.25}
 
 #: Speaker-disjoint splitting needs a speaker pool big enough that no speaker
 #: leaks across a boundary. 24 gives roughly 20 calls per speaker at the

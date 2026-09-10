@@ -1,0 +1,51 @@
+{
+  "n_calls": 160,
+  "n_turns": 1221,
+  "percentiles": [
+    10.0,
+    90.0
+  ],
+  "anchors": {
+    "f0_cv": [
+      0.21303,
+      0.47862
+    ],
+    "f0_span": [
+      0.72867,
+      1.41406
+    ],
+    "emphasis_var": [
+      2.03095,
+      7.6031
+    ],
+    "rate_std": [
+      0.364,
+      1.12592
+    ]
+  },
+  "medians": {
+    "f0_cv": {
+      "human": 0.37825,
+      "synthetic": 0.28722
+    },
+    "f0_span": {
+      "human": 1.22673,
+      "synthetic": 0.96949
+    },
+    "emphasis_var": {
+      "human": 5.25219,
+      "synthetic": 4.74865
+    },
+    "rate_std": {
+      "human": 0.7801,
+      "synthetic": 0.63129
+    }
+  },
+  "direction_ok": {
+    "f0_cv": true,
+    "f0_span": true,
+    "emphasis_var": true,
+    "rate_std": true
+  },
+  "status": "calibrated"
+}

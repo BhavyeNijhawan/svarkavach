@@ -129,9 +129,12 @@ class Pipeline:
     def _asr_backend() -> str:
         try:
             from .text.asr import ASR
-            return ASR().backend
-        except Exception:
-            return "gold"
+            # ASR exposes resolve(), not a `backend` attribute. Reading the
+            # wrong name raised AttributeError straight into the except, so
+            # this always reported "gold" even with Whisper installed.
+            return str(ASR().resolve())
+        except Exception as exc:
+            return f"unavailable ({type(exc).__name__})"
 
     # ------------------------------------------------------------ lookups
 
@@ -333,6 +336,13 @@ class Pipeline:
 
         calls = list(calls or self.calls)
         train = [c for c in calls if c.split == "train"] or calls
+        # The anti-spoof scorer holds out a slice to fit its Platt
+        # calibrator on, and prefers rows marked "dev" because the corpus
+        # splits are speaker disjoint. Passing it only the train rows meant
+        # no row was ever labelled dev, so it fell back to a random split of
+        # the training pool and calibrated on speakers it had just fitted on.
+        dev = [c for c in calls if c.split == "dev"]
+        train_and_dev = train + dev
         report: Dict[str, Any] = {}
 
         def say(msg):
@@ -369,7 +379,12 @@ class Pipeline:
         try:
             from .text.coercion import ActHMM
             say("fitting dialogue act sequence model")
-            hmm = ActHMM()
+            # Inference passes the rule classifier's predicted acts to llr(),
+            # so fitting on gold acts trains on a different distribution than
+            # it is ever scored on. On a generated corpus the gold act
+            # sequence is a deterministic function of the scenario arc, which
+            # makes that gap worse, not better.
+            hmm = ActHMM(use_gold=False)
             hmm.fit(train)
             hmm.save(str(artifact_path("act_hmm.joblib")))
             self.models.acthmm = hmm
@@ -405,7 +420,7 @@ class Pipeline:
             from .antispoof.scorer import AntiSpoofScorer
             say("training anti-spoofing branch")
             sc = self.models.antispoof or AntiSpoofScorer()
-            sc.fit(train)
+            sc.fit(train_and_dev)
             sc.save(str(artifact_path("antispoof.joblib")))
             self.models.antispoof = sc
             report["antispoof"] = getattr(sc, "backend", "trained")
@@ -413,9 +428,22 @@ class Pipeline:
             report["antispoof"] = f"failed: {type(exc).__name__}: {exc}"
             say(f"  antispoof failed: {exc}")
 
-        # 6. fusion, which needs every branch above to be in place first
-        say("featurising the training split for fusion")
-        X, y, feats, kept = featurize_corpus(train, models=self.models,
+        # 6. fusion, which needs every branch above to be in place first.
+        #
+        # It is featurised on `dev`, NOT on `train`. The fusion model stacks on
+        # top of the branches, so featurising the branches' own training rows
+        # feeds it in-sample predictions: the CRF scores entity F1 1.000 there
+        # against 0.887 on held-out data, and the resulting feature
+        # distribution never occurs at test time. Worse, the shift is uneven
+        # across branches, which is exactly what the audio-only against
+        # text-only against full comparison is supposed to measure.
+        fusion_calls = dev if len(dev) >= 40 else train
+        if fusion_calls is train:
+            say(f"  dev has only {len(dev)} calls, falling back to train for "
+                f"fusion (the branch scores will be optimistic)")
+        say(f"featurising {len(fusion_calls)} {'dev' if fusion_calls is dev else 'train'} "
+            f"calls for fusion")
+        X, y, feats, kept = featurize_corpus(fusion_calls, models=self.models,
                                              with_audio=True, progress=verbose)
         say(f"  {X.shape[0]} calls, {X.shape[1]} features")
         models = train_all_arms(X, y, kind="logreg")
@@ -425,6 +453,7 @@ class Pipeline:
         gbm.save(str(artifact_path("fusion_full_gbm.joblib")))
         self.models.fusion = models.get("full")
         report["fusion"] = {arm: m.train_meta for arm, m in models.items()}
+        report["fusion_fitted_on"] = "dev" if fusion_calls is dev else "train"
 
         # a reference distribution for the radar chart in the console
         try:

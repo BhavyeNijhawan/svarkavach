@@ -142,17 +142,44 @@ def _score_voice(models: ModelBundle, audio: np.ndarray, sr: int,
     return bs
 
 
-def tag_entities(models: ModelBundle, call: Call, use_gold: bool = False) -> List[EntitySpan]:
-    """Predicted entity spans for a call, or the gold ones when asked."""
+def tag_entities(
+    models: ModelBundle,
+    call: Call,
+    use_gold: bool = False,
+    notes: Optional[Dict[str, Any]] = None,
+) -> List[EntitySpan]:
+    """Predicted entity spans for a call, or the gold ones when explicitly asked.
+
+    Falling back to `turn.bio` when the tagger is missing or throws was a
+    silent evaluation leak: `turn.bio` is the GOLD annotation, so a held-out
+    call scored with a broken tagger produced entity counts identical to the
+    ground truth, and every entity feature plus the ablation table inherited
+    that. An absent tagger now yields no entities at all, which is the honest
+    answer, and the reason is recorded so it shows up instead of hiding.
+    """
     spans: List[EntitySpan] = []
+    n_failed = 0
     for t in call.turns:
-        if use_gold or models.ner is None:
+        if use_gold:
             bio = t.bio
+        elif models.ner is None:
+            bio = ["O"] * len(t.tokens)
         else:
-            bio = _safe(models.ner.predict_turn, t.bio, t.tokens)
+            bio = _safe(models.ner.predict_turn, None, t.tokens)
             if not bio or len(bio) != len(t.tokens):
-                bio = t.bio
+                bio = ["O"] * len(t.tokens)
+                n_failed += 1
         spans.extend(decode_bio(t.tokens, bio, turn_index=t.index))
+
+    if notes is not None:
+        if use_gold:
+            notes["entity_source"] = "gold"
+        elif models.ner is None:
+            notes["entity_source"] = "none (no tagger loaded)"
+        elif n_failed:
+            notes["entity_source"] = f"predicted ({n_failed} turns failed)"
+        else:
+            notes["entity_source"] = "predicted"
     return spans
 
 
@@ -220,15 +247,21 @@ def build_features(
     if models.intent is not None and hasattr(models.intent, "score_call"):
         try:
             cs = models.intent.score_call(call)
-            if isinstance(cs, dict) and "score" in cs:
-                F["intent_score"] = _finite(cs["score"], F["intent_score"])
+            if isinstance(cs, dict):
+                # the pooler returns "intent_score"; matching only on "score"
+                # meant this branch never fired, the dict fell through to
+                # _finite(dict) which raised, and the exception was swallowed,
+                # so the trained call-level model was silently unused
+                key = next((k for k in ("intent_score", "score") if k in cs), None)
+                if key is not None:
+                    F["intent_score"] = _finite(cs[key], F["intent_score"])
                 detail["intent_call"] = cs
             elif cs is not None:
                 F["intent_score"] = _finite(cs, F["intent_score"])
         except Exception:
             pass
 
-    spans = tag_entities(models, call, use_gold=use_gold_entities)
+    spans = tag_entities(models, call, use_gold=use_gold_entities, notes=detail)
     detail["entities"] = [s.to_dict() for s in spans]
     n_tok = max(sum(len(t.tokens) for t in call.turns), 1)
     counts: Dict[str, int] = {}
@@ -262,7 +295,9 @@ def build_features(
     acts: List[str] = []
     try:
         from ..text.coercion import act_classifier, coercion_features
-        acts = [_safe(act_classifier, t.act or "INFORM", t) for t in call.turns]
+        # same trap as the entity tagger: defaulting to t.act would hand the
+        # gold dialogue act back on any failure
+        acts = [_safe(act_classifier, "INFORM", t) for t in call.turns]
         cf = coercion_features(call, acts=acts)
         for k in ("coercion_slope", "coercion_peak", "callee_resist"):
             F[k] = _finite(cf.get(k), 0.0)
