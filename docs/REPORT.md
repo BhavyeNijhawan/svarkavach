@@ -251,6 +251,55 @@ the artefacts the anti-spoofing features are designed to find. This is a
 simulator for offline work and is documented as one: it is not a clone of any
 person, and the real-data results come from the Colab notebooks.
 
+### 4.7 Building a Hindi anti-spoofing set, and the confound that nearly ruined it
+
+No public Hindi anti-spoofing corpus exists. The survey behind this project
+checked and the nearest thing, IITG-HingCoS (25 hours of Hinglish at 8 kHz
+recorded over the telephone), is not distributed at all. So the set is built
+here, from GramVaani (OpenSLR 118): 2,884 transcribed real Hindi telephone
+utterances from 2,726 speakers, 1,728 of them natively 8 kHz, carrying gender
+and accent labels.
+
+The construction follows ASVspoof. For every real utterance, the spoof side
+renders the SAME transcript with a neural voice, half of those additionally
+through the LPC vocoder of section 4.2.1. Matched content is not decoration:
+if the two classes talked about different things, a detector could separate
+them on topic and never learn anything about voice.
+
+Content was not the confound that mattered, though. Channel was.
+
+A real phone recording carries room tone and line hiss, and its quietest
+frames sit around -41 dB. A synthesiser writes digital silence, around -88 dB.
+Measured over 200 clips of each class before any correction:
+
+| statistic | real | machine | AUC on its own |
+| --- | --- | --- | --- |
+| noise floor | -40.7 dB | -88.4 dB | **0.970** |
+| SNR proxy | 46.8 dB | 97.0 dB | **0.979** |
+| zero-crossing rate | 0.219 | 0.134 | **0.967** |
+| duration | 9.58 s | 8.18 s | 0.609 |
+
+A detector could reach roughly 97 percent on that pairing without listening to
+the voice at all. It would have produced an excellent equal error rate for a
+model that had learned nothing except "quiet means synthetic". This is the
+standard way anti-spoofing results get accidentally faked, and the only reason
+it was caught here is that someone listened to the audio and said the real
+recordings sounded noisy and the machine ones did not.
+
+The correction is channel matching: both sides through the same codec, and
+shaped noise added to each spoof until its noise floor matches its own
+partner's. Per-pair floor differences fall from about 48 dB to under about
+1 dB, and the channel statistics above drop toward chance. The corrected
+figures are in `data/results/antispoof_results.json` alongside the confound
+audit, which is re-run on every build so the number cannot silently drift back.
+
+Two smaller build issues, recorded because both were invisible in aggregate:
+GramVaani transcripts carry `<inaudible>` markers and the TTS service parses
+its input as SSML, so it read them as tags and truncated 39 of 212 renders (a
+200 character line came back as 1.6 seconds); and duration was checked
+explicitly as a possible leak before the noise floor was, scoring 0.609, which
+is close enough to chance to leave alone.
+
 ## 5. Experimental setup
 
 - 480 calls, balanced across the four cells of {human, cloned} x {benign, scam}

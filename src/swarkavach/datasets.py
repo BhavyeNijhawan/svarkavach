@@ -389,6 +389,20 @@ def match_channel(bonafide, spoof, sr: int = TARGET_SR, seed: int = 0,
     except Exception:
         pass
 
+    # Fix the gain FIRST, and to the same peak on both sides. Matching floors
+    # and then letting the writer peak-normalise afterwards undoes the whole
+    # thing: real speech has a higher crest factor than synthesised speech, so
+    # scaling both to a common peak moves their floors by different amounts.
+    # That is exactly what happened on the first attempt, and the floors came
+    # out 38 dB apart despite the matching code running correctly. Callers
+    # must write these with peak=None.
+    def _to_peak(x, peak=0.95):
+        m = float(np.max(np.abs(x))) if x.size else 0.0
+        return (x * (peak / m)).astype(np.float32) if m > 1e-9 else x.astype(np.float32)
+
+    b = _to_peak(b)
+    s = _to_peak(s)
+
     target = noise_floor_db(b, sr)
     current = noise_floor_db(s, sr)
 
@@ -482,13 +496,13 @@ def build_antispoof_pairs(
         human, y = match_channel(human, y, sr, seed=seed + i)
 
         hp = out_dir / "bonafide" / f"{u['utt_id']}.wav"
-        write_wav(hp, human, sr)
+        write_wav(hp, human, sr, peak=None)   # peak=None: see match_channel
         manifest.append({"path": str(hp), "label": 0, "kind": "bonafide",
                          "speaker": u["speaker"], "text": u["text"],
                          "source": u["dataset"]})
 
         sp = out_dir / "spoof" / f"{u['utt_id']}_{'voc' if vocoded else 'tts'}.wav"
-        write_wav(sp, y, sr)
+        write_wav(sp, y, sr, peak=None)
         manifest.append({"path": str(sp), "label": 1,
                          "kind": "vocoded_tts" if vocoded else "tts",
                          "speaker": u["speaker"], "text": u["text"],
@@ -497,8 +511,16 @@ def build_antispoof_pairs(
         if progress and n_ok % 50 == 0:
             print(f"    {n_ok}/{len(utts)} pairs")
 
+    # Audit before writing, so a leaky set announces itself rather than being
+    # discovered three experiments later.
+    audit = confound_audit(manifest, sr)
+    if progress:
+        print(f"  channel audit: worst statistic AUC {audit.get('worst_auc')} "
+              f"({audit.get('status')})")
+
     mpath = out_dir / "manifest.json"
     payload = {
+        "confound_audit": audit,
         "n_pairs": n_ok,
         "n_files": len(manifest),
         "sample_rate": sr,
@@ -514,6 +536,69 @@ def build_antispoof_pairs(
     mpath.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
     payload["manifest"] = str(mpath)
     return payload
+
+
+def confound_audit(manifest_items: Sequence[Dict[str, Any]],
+                   sr: int = TARGET_SR) -> Dict[str, Any]:
+    """Can a trivial channel statistic separate bonafide from spoof?
+
+    This runs on every build and the result is stored in the manifest, because
+    the failure it guards against is silent. A spoofing set whose two classes
+    differ in noise floor gives a detector an easy shortcut, and the resulting
+    equal error rate looks excellent while measuring the recording conditions
+    rather than the speaker. Before channel matching, the noise floor alone
+    scored AUC 0.970 on this data.
+
+    Anything above about 0.75 means the set is not usable as it stands.
+    """
+    import numpy as np
+
+    from .audioio import read_audio
+    from .dsp.framing import frame_signal, short_time_energy, zero_crossing_rate
+    from .evaluate import roc_auc
+
+    rows: Dict[int, List[Dict[str, float]]] = {0: [], 1: []}
+    for it in manifest_items:
+        try:
+            x, _ = read_audio(it["path"], sr=sr)
+        except Exception:
+            continue
+        if x.size < 4000:
+            continue
+        fr = frame_signal(x, 200, 80, window="hamming")
+        e = short_time_energy(fr)
+        db = 10.0 * np.log10(np.maximum(e, 1e-12))
+        rows[int(it["label"])].append({
+            "noise_floor_db": float(np.percentile(db, 10)),
+            "snr_proxy_db": float(np.percentile(db, 95) - np.percentile(db, 10)),
+            "zcr_mean": float(np.mean(zero_crossing_rate(fr))),
+            "duration": float(x.size) / sr,
+        })
+
+    out: Dict[str, Any] = {"per_statistic": {}, "n_bonafide": len(rows[0]),
+                           "n_spoof": len(rows[1])}
+    if not rows[0] or not rows[1]:
+        out["status"] = "not enough audio to audit"
+        return out
+
+    worst = 0.5
+    for k in ("noise_floor_db", "snr_proxy_db", "zcr_mean", "duration"):
+        a = np.array([r[k] for r in rows[0]])
+        b = np.array([r[k] for r in rows[1]])
+        y = np.array([0] * a.size + [1] * b.size)
+        auc = roc_auc(np.concatenate([a, b]), y)
+        auc = max(auc, 1.0 - auc)      # leakage regardless of direction
+        worst = max(worst, auc)
+        out["per_statistic"][k] = {
+            "bonafide_mean": round(float(a.mean()), 3),
+            "spoof_mean": round(float(b.mean()), 3),
+            "auc_alone": round(float(auc), 4),
+        }
+    out["worst_auc"] = round(float(worst), 4)
+    out["status"] = ("channel leak, do not trust the EER" if worst > 0.75
+                     else "weak residual leak" if worst > 0.62
+                     else "clean")
+    return out
 
 
 def load_antispoof_pairs(out_dir: Optional[Path] = None) -> Dict[str, Any]:
