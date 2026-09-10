@@ -17,7 +17,22 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 NOTEBOOKS = ROOT / "notebooks"
+# Notebooks 01 to 05 store a full clone URL; notebook 00 stores a user/repo
+# slug, because it builds the URL with a token in front for private repos.
 PATTERN = re.compile(r'(REPO_URL\s*=\s*)(["\'])([^"\']*)(\2)')
+SLUG_PATTERN = re.compile(r'(REPO_SLUG\s*=\s*)(["\'])([^"\']*)(\2)')
+
+
+def to_slug(url: str) -> str:
+    """https://github.com/user/repo.git or git@github.com:user/repo -> user/repo"""
+    s = url.strip().rstrip("/")
+    if s.endswith(".git"):
+        s = s[:-4]
+    if "github.com/" in s:
+        s = s.split("github.com/", 1)[1]
+    elif ":" in s:
+        s = s.rsplit(":", 1)[1]
+    return s
 
 
 def current() -> dict:
@@ -25,7 +40,8 @@ def current() -> dict:
     for nb_path in sorted(NOTEBOOKS.glob("*.ipynb")):
         nb = json.loads(nb_path.read_text(encoding="utf-8"))
         for cell in nb.get("cells", []):
-            m = PATTERN.search("".join(cell.get("source", [])))
+            body = "".join(cell.get("source", []))
+            m = PATTERN.search(body) or SLUG_PATTERN.search(body)
             if m:
                 found[nb_path.name] = m.group(3)
                 break
@@ -42,9 +58,15 @@ def set_url(url: str) -> int:
         hit = False
         for cell in nb.get("cells", []):
             src = cell.get("source", [])
+            slug = to_slug(url)
             for i, line in enumerate(src):
                 if PATTERN.search(line):
-                    src[i] = PATTERN.sub(lambda m: f"{m.group(1)}{m.group(2)}{url}{m.group(4)}", line)
+                    src[i] = PATTERN.sub(
+                        lambda m: f"{m.group(1)}{m.group(2)}{url}{m.group(4)}", line)
+                    hit = True
+                elif SLUG_PATTERN.search(line):
+                    src[i] = SLUG_PATTERN.sub(
+                        lambda m: f"{m.group(1)}{m.group(2)}{slug}{m.group(4)}", line)
                     hit = True
         if hit:
             # indent=1 matches how the notebooks were written, so the diff
