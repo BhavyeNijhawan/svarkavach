@@ -425,6 +425,44 @@ def match_channel(bonafide, spoof, sr: int = TARGET_SR, seed: int = 0,
     return b.astype(np.float32), np.asarray(s, dtype=np.float32)
 
 
+def _write_pair(u, spoof, i, sr, out_dir, rng, manifest) -> bool:
+    """Write one bonafide and its matched spoof. Returns whether it landed."""
+    from .audioio import read_audio, write_wav
+    from .corpus import neural_tts as N
+
+    if spoof is None:
+        return False
+    try:
+        human, _ = read_audio(u["path"], sr=sr)
+    except Exception:
+        return False
+    if human.size < int(0.5 * sr):
+        return False
+
+    # half plain TTS, half vocoded, so the spoof side is not one system
+    vocoded = bool(rng.random() < 0.5)
+    y = N.vocoder_artifacts(spoof, sr) if vocoded else spoof
+
+    # Both sides through the same channel, and the spoof's noise floor matched
+    # to its own partner's. Without this the pair is separable on silence level
+    # alone at AUC 0.97 and the branch learns nothing about voice.
+    human, y = match_channel(human, y, sr, seed=i)
+
+    hp = out_dir / "bonafide" / f"{u['utt_id']}.wav"
+    write_wav(hp, human, sr, peak=None)   # peak=None: see match_channel
+    manifest.append({"path": str(hp), "label": 0, "kind": "bonafide",
+                     "speaker": u["speaker"], "text": u["text"],
+                     "source": u["dataset"]})
+
+    sp = out_dir / "spoof" / f"{u['utt_id']}_{'voc' if vocoded else 'tts'}.wav"
+    write_wav(sp, y, sr, peak=None)
+    manifest.append({"path": str(sp), "label": 1,
+                     "kind": "vocoded_tts" if vocoded else "tts",
+                     "speaker": u["speaker"], "text": u["text"],
+                     "source": "edge_tts"})
+    return True
+
+
 def build_antispoof_pairs(
     n: int = 300,
     sr: int = TARGET_SR,
@@ -463,53 +501,37 @@ def build_antispoof_pairs(
                 "status": status()}
 
     rng = np.random.default_rng(seed)
-    items = []
-    for i, u in enumerate(utts):
-        v = N.voice_for_speaker(f"spoof_{i % 40}", seed)
-        # GramVaani transcripts are already Devanagari, so no transliteration.
-        # They do carry <inaudible> markers though, and the TTS service reads
-        # those as SSML tags and stops rendering at the first one, so they have
-        # to be stripped or the spoof clip comes back truncated.
-        items.append((N.clean_for_tts(u["text"]), v["voice"], v["rate"], v["pitch"]))
-
-    if progress:
-        print(f"  rendering {len(items)} spoof utterances")
-    rendered = N.synth_batch(items, sr=sr)
-
     manifest: List[Dict[str, Any]] = []
     n_ok = 0
-    for i, (u, spoof) in enumerate(zip(utts, rendered)):
-        try:
-            human, _ = read_audio(u["path"], sr=sr)
-        except Exception:
-            continue
-        if spoof is None or human.size < int(0.5 * sr):
-            continue
 
-        # half plain TTS, half vocoded, so the spoof side is not one system
-        vocoded = bool(rng.random() < 0.5)
-        y = N.vocoder_artifacts(spoof, sr) if vocoded else spoof
+    # Render and write in chunks rather than holding every clip in memory at
+    # once. Five hundred utterances of decoded audio plus their renders is well
+    # over a gigabyte, and this machine has 8 GB total, so the all-at-once
+    # version got killed by the OOM reaper part way through.
+    CHUNK = 40
+    for start in range(0, len(utts), CHUNK):
+        batch = utts[start:start + CHUNK]
+        items = []
+        for j, u in enumerate(batch):
+            v = N.voice_for_speaker(f"spoof_{(start + j) % 40}", seed)
+            # GramVaani transcripts are already Devanagari, so no
+            # transliteration. They do carry <inaudible> markers though, and
+            # the TTS service reads those as SSML tags and stops rendering at
+            # the first one, so they have to be stripped.
+            items.append((N.clean_for_tts(u["text"]), v["voice"], v["rate"], v["pitch"]))
 
-        # Both sides through the same channel, and the spoof's noise floor
-        # matched to its own partner's. Without this the pair is separable on
-        # silence level alone at AUC 0.97 and the branch learns nothing.
-        human, y = match_channel(human, y, sr, seed=seed + i)
+        rendered = N.synth_batch(items, sr=sr)
+        if progress:
+            got = sum(1 for r in rendered if r is not None)
+            print(f"    {start + len(batch)}/{len(utts)} rendered "
+                  f"({got}/{len(batch)} in this chunk)", flush=True)
 
-        hp = out_dir / "bonafide" / f"{u['utt_id']}.wav"
-        write_wav(hp, human, sr, peak=None)   # peak=None: see match_channel
-        manifest.append({"path": str(hp), "label": 0, "kind": "bonafide",
-                         "speaker": u["speaker"], "text": u["text"],
-                         "source": u["dataset"]})
+        for j, (u, spoof) in enumerate(zip(batch, rendered)):
+            i = start + j
+            if _write_pair(u, spoof, i, sr, out_dir, rng, manifest):
+                n_ok += 1
+        del rendered
 
-        sp = out_dir / "spoof" / f"{u['utt_id']}_{'voc' if vocoded else 'tts'}.wav"
-        write_wav(sp, y, sr, peak=None)
-        manifest.append({"path": str(sp), "label": 1,
-                         "kind": "vocoded_tts" if vocoded else "tts",
-                         "speaker": u["speaker"], "text": u["text"],
-                         "source": "edge_tts"})
-        n_ok += 1
-        if progress and n_ok % 50 == 0:
-            print(f"    {n_ok}/{len(utts)} pairs")
 
     # Audit before writing, so a leaky set announces itself rather than being
     # discovered three experiments later.
