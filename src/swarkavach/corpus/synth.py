@@ -160,6 +160,50 @@ SYNTHETIC_TILT_EXTRA = 0.30       # duller high band
 SYNTHETIC_TIMING_GRID_S = 0.020   # segment durations snap to this
 SYNTHETIC_BUZZ_GAIN = 0.030       # constant phase harmonic stack
 
+# --------------------------------------------------------------------------
+# Macro prosody, and how it responds to arousal
+# --------------------------------------------------------------------------
+#
+# Everything above models artefacts at the scale of one pitch period: jitter,
+# shimmer, phase regularity, spectral smoothing. Those are what the
+# anti-spoofing branch reads, and they already separate the two paths well
+# (measured jitter 0.129 human against 0.049 cloned).
+#
+# This block models something larger: how far the pitch and loudness contour
+# travels across an utterance, and whether that travel tracks what is being
+# said. A person delivering a threat raises pitch and pushes energy. A
+# text-to-speech voice reads a threat with the same contour it gives a weather
+# report, because it was trained to produce a neutral reading of arbitrary
+# text. That gap is the phenomenon the prosody-intent mismatch feature
+# measures, so the simulator has to reproduce it or there is nothing offline
+# for that feature to find.
+#
+# Being explicit about the circularity, because it changes how the results
+# should be read: this reproduces a documented property of real speech, it does
+# not demonstrate that the property exists. Offline numbers show the method
+# works given the phenomenon. Whether real cloned speech is flat enough for it
+# to work in practice is measured on real recordings in notebooks 02 and 05,
+# and the report says so rather than quietly generalising.
+
+#: Expressiveness range for a human speaker, from turn arousal in [0, 1]. A
+#: bored person still moves their voice a little, hence the floor.
+HUMAN_EXPR_FLOOR = 0.20
+HUMAN_EXPR_GAIN = 0.80
+
+#: Expressiveness for a cloned voice: nearly flat, and nearly independent of
+#: the text. Not exactly constant, because real systems do respond to sentence
+#: type and punctuation, just far less than a person.
+SYNTHETIC_EXPR_FLOOR = 0.12
+SYNTHETIC_EXPR_GAIN = 0.10
+
+
+def expressiveness(arousal: float, synthetic: bool) -> float:
+    """How far the contour is allowed to travel, given the turn's arousal."""
+    a = float(np.clip(arousal, 0.0, 1.0))
+    if synthetic:
+        return SYNTHETIC_EXPR_FLOOR + SYNTHETIC_EXPR_GAIN * a
+    return HUMAN_EXPR_FLOOR + HUMAN_EXPR_GAIN * a
+
 
 # --------------------------------------------------------------------------
 # Text to segments
@@ -225,6 +269,7 @@ def plan_segments(
     voice: Dict[str, float],
     synthetic: bool,
     rng: np.random.Generator,
+    expr: float = 0.5,
 ) -> List[Tuple[str, str, float]]:
     """(class, vowel key, duration in seconds) for the whole turn.
 
@@ -254,7 +299,9 @@ def plan_segments(
             grid = SYNTHETIC_TIMING_GRID_S
             d = max(grid, round(d / grid) * grid)
         else:
-            d *= float(1.0 + rng.normal(0.0, 0.08))
+            # An animated speaker also varies segment length more, which is
+            # what shows up as rate variability across the turn.
+            d *= float(1.0 + rng.normal(0.0, 0.05 + 0.12 * expr))
             d = max(0.020, d)
         out.append((kind, key, d))
     return out
@@ -290,6 +337,7 @@ def build_tracks(
     voice: Dict[str, float],
     synthetic: bool,
     rng: np.random.Generator,
+    expr: float = 0.5,
 ) -> Dict[str, np.ndarray]:
     """Per-frame formants, bandwidths, F0, amplitude, voicing and noise gain."""
     hop = max(1, int(round(HOP_S * sr)))
@@ -322,6 +370,15 @@ def build_tracks(
             # Nasals and liquids: low F1, damped, F2 pulled toward the middle.
             f1 *= 0.55
             f2 = 0.85 * f2 + 0.15 * 1500.0
+        # Syllable emphasis. An animated speaker hits some syllables much
+        # harder than others; a flat reading gives them all the same weight.
+        # This is what separates the loudness contour of the two paths, and
+        # without it the cloned path actually measured MORE energy variation
+        # than the human one, because its quantised segment grid produces
+        # sharper boundaries.
+        emph = 1.0
+        if kind in ("V", "N"):
+            emph = float(np.clip(1.0 + rng.normal(0.0, 0.04 + 0.36 * expr), 0.30, 2.0))
         for i in range(min(n, n_frames - frame)):
             f = frame + i
             row = [f1, f2, f3] + fixed_upper
@@ -330,9 +387,9 @@ def build_tracks(
             widen = 1.0 if kind == "V" else (2.0 if kind == "N" else 1.4)
             bws[f] = [base_bw[j] * bw_scale * widen for j in range(n_formants)]
             if kind == "V":
-                amp[f], voiced[f], noise[f] = 1.00, True, float(voice["breath"])
+                amp[f], voiced[f], noise[f] = 1.00 * emph, True, float(voice["breath"])
             elif kind == "N":
-                amp[f], voiced[f], noise[f] = 0.55, True, float(voice["breath"]) * 0.7
+                amp[f], voiced[f], noise[f] = 0.55 * emph, True, float(voice["breath"]) * 0.7
             elif kind == "F":
                 amp[f], voiced[f] = 0.0, False
                 noise[f] = 0.45 if not synthetic else 0.32
@@ -370,8 +427,22 @@ def build_tracks(
     # slow drift for the human path only.
     t = np.linspace(0.0, 1.0, n_frames)
     f0 = np.full(n_frames, float(voice["f0"]))
-    f0 *= 1.0 + 0.06 * (1.0 - t) - 0.05 * t          # declination
-    accent = np.sin(2.0 * np.pi * t * 2.5) * float(voice["f0_range"]) * 0.5
+    # Declination and accent depth both scale with expressiveness. A flat
+    # reading keeps the contour close to the speaker's mean pitch; an animated
+    # one swings well above and below it.
+    f0 *= 1.0 + (0.03 + 0.09 * expr) * (1.0 - t) - (0.02 + 0.07 * expr) * t
+    accent = (
+        np.sin(2.0 * np.pi * t * 2.5)
+        * float(voice["f0_range"])
+        * (0.25 + 1.75 * expr)
+    )
+    # A second, slower accent so an animated turn does not read as one tidy
+    # sinusoid. Its depth scales the same way.
+    accent = accent + (
+        np.sin(2.0 * np.pi * t * 0.9 + 1.1)
+        * float(voice["f0_range"])
+        * (0.10 + 0.85 * expr)
+    )
     f0 *= 1.0 + accent
     if not synthetic:
         drift = _smooth(rng.normal(0.0, 1.0, n_frames), max(3, n_frames // 8))
@@ -582,20 +653,30 @@ def synthesize_turn(
     voice: Optional[Dict[str, float]] = None,
     synthetic: bool = False,
     seed: int = 0,
+    arousal: float = 0.35,
 ) -> np.ndarray:
     """Render one turn of speech-like audio.
 
-    Deterministic for a given (text, voice, synthetic, seed). Returns float32
-    samples in [-1, 1], loudness normalised so downstream detector scores stay
-    comparable across turns.
+    `arousal` in [0, 1] is how worked up the speaker is on this turn. The
+    caller supplies it from the dialogue act, so a THREAT turn is rendered with
+    more pitch movement and sharper syllable emphasis than a GREET turn. The
+    cloned path largely ignores it, which is the whole point: see the macro
+    prosody block near the top of this module. The default sits low so a call
+    rendered without act information reads as a flat delivery rather than an
+    animated one.
+
+    Deterministic for a given (text, voice, synthetic, seed, arousal). Returns
+    float32 samples in [-1, 1], loudness normalised so downstream detector
+    scores stay comparable across turns.
     """
     voice = dict(voice or make_voice("spk_default", seed))
     if synthetic:
         voice.update(SYNTHETIC_OVERRIDES)
     rng = _rng_from("turn", text, voice.get("speaker_id", "?"), int(synthetic), seed)
+    expr = expressiveness(arousal, synthetic)
 
-    plan = plan_segments(text, voice, synthetic, rng)
-    tracks = build_tracks(plan, sr, voice, synthetic, rng)
+    plan = plan_segments(text, voice, synthetic, rng, expr=expr)
+    tracks = build_tracks(plan, sr, voice, synthetic, rng, expr=expr)
     exc = build_excitation(tracks, sr, voice, synthetic, rng)
     y = apply_vocal_tract(exc, tracks, sr)
 

@@ -47,10 +47,17 @@ Five things are.
 **Prosody-Intent Mismatch.** A cloned voice reading a threat script says
 frightening things in a flat voice. The system measures lexical pressure per
 turn from a weighted fraud lexicon, measures acoustic arousal from pitch
-movement, energy dynamics and speaking-rate variation, and scores the gap.
+movement, syllable emphasis and speaking-rate variation, and scores the gap.
 Neither branch can compute this alone, which is what makes it a genuine
 cross-modal feature rather than a late-fusion input. On the same words, a flat
 synthetic delivery scores about ten times higher than an animated human one.
+
+The offline audio is generated, and the generator had to be taught to make
+cloned speech prosodically flat before this feature had anything to detect.
+So the offline result shows the method works given the phenomenon; it does not
+prove the phenomenon. That distinction is spelled out in `docs/REPORT.md`
+section 4.2.1, and testing the premise on real recordings is what the Colab
+notebooks are for.
 
 **Coercion trajectory.** A scam call has a shape: claim an authority, state a
 problem, threaten, attach a deadline, isolate the victim, extract. Each turn is

@@ -108,12 +108,56 @@ the evidence panel reports exact attributions rather than a sampled estimate.
 For each caller turn, lexical arousal is computed from weighted fraud lexicons
 (urgency, threat, authority, payment, personal-information request, isolation,
 with benign markers subtracting) and blended with the intent model's score.
-Acoustic arousal is computed from pitch coefficient of variation, pitch range
-relative to mean, short-time energy variation and speaking-rate variation,
-each mapped through fixed absolute anchors rather than per-call normalisation.
-The anchors are absolute on purpose: normalising within a call would make a
-uniformly flat synthetic call look normal, which is the exact case the feature
-exists to catch.
+Acoustic arousal comes from four quantities: pitch coefficient of variation,
+pitch range relative to mean, the spread of syllable peak levels, and
+speaking-rate variation, each mapped through fixed absolute anchors rather
+than per-call normalisation. The anchors are absolute on purpose: normalising
+within a call would make a uniformly flat synthetic call look normal, which is
+the exact case the feature exists to catch.
+
+Two things about this had to be fixed by measurement rather than reasoning,
+and both are worth stating because they are the kind of error that silently
+produces a feature which looks implemented and does nothing.
+
+First, the anchors were originally hand-set. Measured against 217 rendered
+caller turns, every one of them was far too low: real turns pinned the scale
+at its ceiling 81 percent of the time, acoustic arousal came out at 1.0
+almost everywhere, and the gap term was identically zero. The anchors are now
+derived from the pooled 10th and 90th percentiles of the corpus, and
+`Pipeline.fit` recalibrates them on every retrain so a change to the audio
+cannot quietly break the feature again.
+
+Second, the third component was originally a frame-level energy standard
+deviation. Measured, it separated the two classes in the WRONG direction
+(synthetic 11.2 dB against human 8.1 dB, a separation of -1.44 standard
+deviations) and was cancelling out the pitch components. The reason is that
+frame-level energy variance is dominated by the alternation between vowels,
+consonants and pauses, which is a fact about articulation rather than about
+how emphatic someone is being. Replacing it with the spread of syllable PEAK
+levels, which is what emphasis actually means, flipped it to +1.03. After both
+fixes the composite separates as intended: mean acoustic arousal 0.65 for
+human renderings against 0.37 for synthetic ones, with saturation down to
+1 percent.
+
+### 4.2.1 A note on what the offline PIM result can and cannot show
+
+The corpus synthesiser had to be extended to model this phenomenon at all. Its
+original cloned path reduced jitter, shimmer and spectral detail, which are
+period-scale artefacts, but left the pitch and loudness CONTOUR identical to
+the human path. Macro-prosody is what PIM reads, so there was nothing offline
+for it to find. The synthesiser now takes a per-turn arousal value derived
+from the dialogue act and lets a human rendering respond to it strongly while
+a cloned rendering barely responds, which is the documented behaviour of real
+text-to-speech.
+
+That means the offline PIM numbers demonstrate that the METHOD separates flat
+delivery from animated delivery. They do not demonstrate that real cloned
+speech is flat, because the simulator was told to make it flat. Deliberately,
+the arousal signal driving the renderer is the dialogue act, not the fraud
+lexicon that PIM reads, so the two are related rather than identical, but the
+circularity is not removed by that and should not be claimed away. Validating
+the underlying premise needs real recordings against real TTS, which is what
+notebooks 02 and 05 do.
 
 The score combines a pressure-weighted gap with the correlation between the
 two traces:

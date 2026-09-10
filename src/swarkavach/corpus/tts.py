@@ -35,7 +35,7 @@ import numpy as np
 
 from ..audioio import concat_with_gaps, read_audio, rms_normalize, write_wav
 from ..config import CORPUS_AUDIO_DIR, SETTINGS, TARGET_SR
-from ..schema import Call
+from ..schema import COERCION_RANK, Call
 from .synth import SYNTHETIC_OVERRIDES, make_voice, synthesize_turn, voice_summary
 
 #: Silence inserted between turns. Matches generator.TURN_GAP_S.
@@ -103,12 +103,22 @@ def _render_sim(
         is_caller = turn.speaker == "caller"
         voice = caller_voice if is_caller else callee_voice
         synthetic = caller_is_synthetic and is_caller
+        # How worked up this turn should sound, taken from the dialogue act
+        # rather than from the words. Keeping it on the act matters: the
+        # prosody-intent mismatch feature builds lexical arousal from the fraud
+        # lexicon and the intent model, so driving the rendering from that same
+        # lexicon would make the evaluation circular. The act is a related but
+        # separate quantity, which is also the relationship a real call has.
+        arousal = float(COERCION_RANK.get(turn.act, 0.25))
+        if not is_caller:
+            arousal = 0.30 if turn.act == "VICTIM_RESIST" else 0.18
         seg = synthesize_turn(
             turn.text,
             sr=sr,
             voice=voice,
             synthetic=synthetic,
             seed=seed + turn.index,
+            arousal=arousal,
         )
         segments.append(seg)
         per_turn.append(
@@ -116,6 +126,7 @@ def _render_sim(
                 "index": turn.index,
                 "speaker": turn.speaker,
                 "synthetic": bool(synthetic),
+                "arousal": round(arousal, 3),
                 "n_samples": int(seg.size),
             }
         )

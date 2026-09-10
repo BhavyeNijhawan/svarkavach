@@ -32,6 +32,8 @@ feature exists to catch.
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
@@ -41,28 +43,92 @@ from ..corpus.lexicon import PRESSURE_WEIGHTS, lexicon_hits
 from ..schema import Call, Turn
 
 # Anchors for the absolute normalisation. Each is (low, high): a value at or
-# below `low` maps to 0, at or above `high` maps to 1. They come from what
-# ordinary telephone speech does, measured on the corpus, and are held fixed
-# so the feature means the same thing across calls and across channels.
-ANCHORS: Dict[str, Tuple[float, float]] = {
-    "f0_cv": (0.020, 0.160),      # pitch standard deviation over pitch mean
-    "f0_span": (0.100, 0.750),    # pitch range over pitch mean
-    "energy_std": (0.8, 6.5),     # short-time energy standard deviation, dB
-    "rate_std": (0.05, 0.55),     # variation in syllable rate across the turn
+# below `low` maps to 0, at or above `high` maps to 1. They are held fixed so
+# the feature means the same thing across calls and across channel conditions,
+# which per-call normalisation would destroy.
+#
+# These defaults are measured, not guessed. The first version of this file used
+# hand-set values and every one of them was far too low: real turns saturated
+# the scale 81 percent of the time, so acoustic arousal came out at 1.0
+# everywhere and the mismatch gap was always zero. `calibrate_anchors` below
+# re-derives them from whatever corpus is on disk, and `Pipeline.fit` runs it
+# on every retrain, so a change to the synthesiser cannot silently break this
+# feature again.
+#: Measured over 217 rendered caller turns, pooled across both voice classes,
+#: at the 10th and 90th percentile. Under these the arousal scale separates as
+#: it should (human mean 0.65, synthetic mean 0.37, saturation 1 percent), and
+#: every component points the right way.
+DEFAULT_ANCHORS: Dict[str, Tuple[float, float]] = {
+    "f0_cv": (0.219, 0.549),        # pitch standard deviation over pitch mean
+    "f0_span": (0.738, 1.447),      # pitch range over pitch mean
+    "emphasis_var": (1.944, 6.591), # spread of syllable peak levels, dB
+    "rate_std": (0.427, 1.101),     # variation in syllable rate across the turn
 }
+
+ANCHOR_KEYS: Tuple[str, ...] = tuple(DEFAULT_ANCHORS)
+
+_ANCHORS: Dict[str, Tuple[float, float]] = dict(DEFAULT_ANCHORS)
+_ANCHORS_LOADED = False
 
 #: How much each acoustic component contributes. Pitch dynamics carry most of
 #: the affect in speech, so they get the larger share.
+#:
+#: `emphasis_var` replaced a plain frame-level energy standard deviation, which
+#: was measured pointing the WRONG way: synthetic turns scored higher than
+#: human ones (separation -1.44). The reason is that frame-level energy
+#: variance is dominated by the vowel to consonant to silence alternation,
+#: which is a fact about articulation, not about how emphatic a speaker is
+#: being. Measuring the spread of SYLLABLE PEAK levels instead captures what
+#: emphasis actually means: hitting some syllables harder than others.
 ACOUSTIC_WEIGHTS: Dict[str, float] = {
     "f0_cv": 0.34,
-    "f0_span": 0.26,
-    "energy_std": 0.24,
+    "f0_span": 0.24,
+    "emphasis_var": 0.26,
     "rate_std": 0.16,
 }
 
 
+def anchors() -> Dict[str, Tuple[float, float]]:
+    """The anchors currently in force, loading the calibrated file once."""
+    global _ANCHORS_LOADED
+    if not _ANCHORS_LOADED:
+        _ANCHORS_LOADED = True
+        load_anchors()
+    return _ANCHORS
+
+
+def set_anchors(new: Dict[str, Sequence[float]]) -> None:
+    """Replace the anchors in memory. Missing keys keep their current value."""
+    global _ANCHORS_LOADED
+    for k, v in (new or {}).items():
+        if k in DEFAULT_ANCHORS and v is not None and len(v) == 2:
+            lo, hi = float(v[0]), float(v[1])
+            if np.isfinite(lo) and np.isfinite(hi) and hi > lo:
+                _ANCHORS[k] = (lo, hi)
+    _ANCHORS_LOADED = True
+
+
+def anchor_path() -> Path:
+    from ..config import MODELS_DIR
+
+    return Path(MODELS_DIR) / "pim_anchors.json"
+
+
+def load_anchors(path: Optional[Path] = None) -> bool:
+    """Load calibrated anchors if they exist. Returns whether any were found."""
+    p = Path(path) if path else anchor_path()
+    if not p.exists():
+        return False
+    try:
+        d = json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        return False
+    set_anchors(d.get("anchors", d))
+    return True
+
+
 def _anchor(value: float, key: str) -> float:
-    lo, hi = ANCHORS[key]
+    lo, hi = anchors()[key]
     if not np.isfinite(value):
         return 0.0
     return float(np.clip((value - lo) / (hi - lo), 0.0, 1.0))
@@ -122,25 +188,86 @@ def lexical_arousal(
 # --------------------------------------------------------------------------
 
 
-def segment_arousal(x: np.ndarray, sr: int) -> Dict[str, float]:
-    """Acoustic arousal of one audio segment, plus the parts it came from."""
+def syllable_emphasis_var(x: np.ndarray, sr: int) -> float:
+    """Spread, in dB, of the peak level of each syllable in a segment.
+
+    Emphasis is a relative thing: it means some syllables are hit harder than
+    their neighbours. So the quantity to measure is the variation ACROSS
+    syllable nuclei, not the variation across all frames. The frame-level
+    version mostly measures how loud vowels are compared to consonants and
+    pauses, which barely changes with how animated a speaker is.
+
+    Peaks are picked from the smoothed energy envelope with the same
+    prominence and spacing rules the speaking-rate estimator uses, so the two
+    features agree about what counts as a syllable.
+    """
+    from scipy import signal as ssig
+
+    from ..dsp.framing import frame_signal, short_time_energy
+
+    x = np.asarray(x, dtype=np.float64).ravel()
+    if x.size < int(0.2 * sr):
+        return 0.0
+
+    frame_len = max(8, int(round(0.025 * sr)))
+    hop = max(4, int(round(0.010 * sr)))
+    try:
+        frames = frame_signal(x, frame_len, hop, window="hamming")
+        energy = short_time_energy(frames)
+    except Exception:
+        return 0.0
+    if energy.size < 5:
+        return 0.0
+
+    db = 10.0 * np.log10(np.maximum(energy, 1e-12))
+    db = np.convolve(db, np.ones(5) / 5.0, mode="same")
+
+    min_dist = max(int(round(0.080 * sr / hop)), 1)
+    peaks, _ = ssig.find_peaks(db, prominence=3.0, distance=min_dist)
+    # Ignore peaks buried in the noise floor: those are not syllables.
+    if peaks.size:
+        floor = np.percentile(db, 20) + 6.0
+        peaks = peaks[db[peaks] > floor]
+    if peaks.size < 2:
+        return 0.0
+    v = float(np.std(db[peaks]))
+    return v if np.isfinite(v) else 0.0
+
+
+def segment_components(x: np.ndarray, sr: int) -> Optional[Dict[str, float]]:
+    """The four raw acoustic quantities for one segment, before anchoring.
+
+    Split out from `segment_arousal` so that `calibrate_anchors` measures
+    exactly what the feature will later consume. Returns None when the segment
+    is too short to say anything about.
+    """
     from ..dsp.prosody import prosody_summary
 
     if x is None or len(x) < int(0.12 * sr):
-        return {"arousal": 0.0, "f0_cv": 0.0, "f0_span": 0.0,
-                "energy_std": 0.0, "rate_std": 0.0, "voiced_ratio": 0.0}
+        return None
 
     p = prosody_summary(np.asarray(x, dtype=np.float32), sr)
     f0m = float(p.get("f0_mean", 0.0)) or 0.0
     f0s = float(p.get("f0_std", 0.0)) or 0.0
     f0r = float(p.get("f0_range", 0.0)) or 0.0
-
-    parts = {
-        "f0_cv": _anchor(f0s / f0m if f0m > 1e-6 else 0.0, "f0_cv"),
-        "f0_span": _anchor(f0r / f0m if f0m > 1e-6 else 0.0, "f0_span"),
-        "energy_std": _anchor(float(p.get("energy_std", 0.0)), "energy_std"),
-        "rate_std": _anchor(float(p.get("rate_std", 0.0)), "rate_std"),
+    return {
+        "f0_cv": f0s / f0m if f0m > 1e-6 else 0.0,
+        "f0_span": f0r / f0m if f0m > 1e-6 else 0.0,
+        "emphasis_var": syllable_emphasis_var(x, sr),
+        "rate_std": float(p.get("rate_std", 0.0)),
+        "voiced_ratio": float(p.get("voiced_ratio", 0.0)),
     }
+
+
+def segment_arousal(x: np.ndarray, sr: int) -> Dict[str, float]:
+    """Acoustic arousal of one audio segment, plus the parts it came from."""
+    raw = segment_components(x, sr)
+    if raw is None:
+        return {"arousal": 0.0, "f0_cv": 0.0, "f0_span": 0.0,
+                "energy_std": 0.0, "rate_std": 0.0, "voiced_ratio": 0.0}
+
+    p = {"voiced_ratio": raw["voiced_ratio"]}
+    parts = {k: _anchor(raw[k], k) for k in ANCHOR_KEYS}
     arousal = sum(ACOUSTIC_WEIGHTS[k] * v for k, v in parts.items())
 
     # An unvoiced or near-silent segment has no prosody to measure. Reporting
@@ -154,6 +281,97 @@ def segment_arousal(x: np.ndarray, sr: int) -> Dict[str, float]:
     out = {"arousal": float(np.clip(arousal, 0.0, 1.0)), "voiced_ratio": vr}
     out.update(parts)
     return out
+
+
+def calibrate_anchors(
+    calls: Sequence[Call],
+    max_calls: int = 160,
+    low_pct: float = 10.0,
+    high_pct: float = 90.0,
+    save: bool = True,
+) -> Dict[str, Any]:
+    """Re-derive the anchors from corpus audio and optionally save them.
+
+    Percentiles are taken over the pooled population, human and synthetic
+    together, so the resulting scale spans the range both classes actually
+    occupy. Calibrating on one class alone would push the other against a
+    clip boundary and throw away the very difference the feature reads.
+
+    Returns a report including the per-class medians, which is what tells you
+    whether each component is pointing the right way. A component whose
+    synthetic median sits ABOVE its human median is working against the
+    feature, and that is worth knowing before trusting the number.
+    """
+    from pathlib import Path as _Path
+
+    from ..audioio import read_audio
+
+    raw: Dict[str, List[float]] = {k: [] for k in ANCHOR_KEYS}
+    by_class: Dict[str, Dict[str, List[float]]] = {
+        "human": {k: [] for k in ANCHOR_KEYS},
+        "synthetic": {k: [] for k in ANCHOR_KEYS},
+    }
+    n_used = 0
+
+    for call in list(calls)[:max_calls]:
+        if not call.audio_path or not _Path(call.audio_path).exists():
+            continue
+        try:
+            x, sr = read_audio(call.audio_path, sr=SETTINGS.frame.sr)
+        except Exception:
+            continue
+        cls = "synthetic" if call.label_voice == "synthetic" else "human"
+        used_this_call = False
+        for t in call.caller_turns():
+            i0, i1 = int(t.t_start * sr), int(t.t_end * sr)
+            comp = segment_components(x[i0:i1], sr) if i1 > i0 else None
+            if comp is None:
+                continue
+            for k in ANCHOR_KEYS:
+                v = float(comp[k])
+                if np.isfinite(v):
+                    raw[k].append(v)
+                    by_class[cls][k].append(v)
+            used_this_call = True
+        n_used += int(used_this_call)
+
+    report: Dict[str, Any] = {
+        "n_calls": n_used,
+        "n_turns": len(raw[ANCHOR_KEYS[0]]),
+        "percentiles": [low_pct, high_pct],
+        "anchors": {},
+        "medians": {},
+        "direction_ok": {},
+    }
+    if report["n_turns"] < 30:
+        report["status"] = "not enough audio, keeping the current anchors"
+        return report
+
+    new: Dict[str, Tuple[float, float]] = {}
+    for k in ANCHOR_KEYS:
+        arr = np.asarray(raw[k], dtype=np.float64)
+        lo, hi = np.percentile(arr, [low_pct, high_pct])
+        if not np.isfinite(lo) or not np.isfinite(hi) or hi - lo < 1e-9:
+            new[k] = _ANCHORS[k]
+        else:
+            new[k] = (float(lo), float(hi))
+        h = by_class["human"][k]
+        s = by_class["synthetic"][k]
+        mh = float(np.median(h)) if h else float("nan")
+        ms = float(np.median(s)) if s else float("nan")
+        report["medians"][k] = {"human": round(mh, 5), "synthetic": round(ms, 5)}
+        # arousal is supposed to be HIGHER for human speech
+        report["direction_ok"][k] = bool(np.isfinite(mh) and np.isfinite(ms) and mh > ms)
+        report["anchors"][k] = [round(new[k][0], 5), round(new[k][1], 5)]
+
+    set_anchors(new)
+    report["status"] = "calibrated"
+    if save:
+        p = anchor_path()
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps(report, indent=2), encoding="utf-8")
+        report["path"] = str(p)
+    return report
 
 
 def acoustic_arousal(

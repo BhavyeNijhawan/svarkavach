@@ -378,7 +378,29 @@ class Pipeline:
             report["act_hmm"] = f"failed: {type(exc).__name__}: {exc}"
             say(f"  act model failed: {exc}")
 
-        # 4. anti-spoofing
+        # 4. prosody-intent anchors, before anything reads the audio.
+        # The anchors set the scale acoustic arousal is measured on, so they
+        # have to be right before the fusion features are built. Recalibrating
+        # here means a change to the synthesiser or a new recording set cannot
+        # silently push every turn against a clip boundary, which is exactly
+        # what happened with the first hand-set values.
+        try:
+            from .fusion.pim import calibrate_anchors
+            say("calibrating prosody-intent anchors")
+            rep = calibrate_anchors(train)
+            report["pim_anchors"] = {
+                "status": rep.get("status"), "n_turns": rep.get("n_turns"),
+                "anchors": rep.get("anchors"), "direction_ok": rep.get("direction_ok"),
+            }
+            bad = [k for k, ok in (rep.get("direction_ok") or {}).items() if not ok]
+            if bad:
+                say(f"  warning: these components read higher for synthetic "
+                    f"speech than for human, so they fight the feature: {bad}")
+        except Exception as exc:
+            report["pim_anchors"] = f"failed: {type(exc).__name__}: {exc}"
+            say(f"  anchor calibration failed: {exc}")
+
+        # 5. anti-spoofing
         try:
             from .antispoof.scorer import AntiSpoofScorer
             say("training anti-spoofing branch")
@@ -391,7 +413,7 @@ class Pipeline:
             report["antispoof"] = f"failed: {type(exc).__name__}: {exc}"
             say(f"  antispoof failed: {exc}")
 
-        # 5. fusion, which needs every branch above to be in place first
+        # 6. fusion, which needs every branch above to be in place first
         say("featurising the training split for fusion")
         X, y, feats, kept = featurize_corpus(train, models=self.models,
                                              with_audio=True, progress=verbose)
