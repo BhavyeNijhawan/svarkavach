@@ -1,51 +1,51 @@
 {
   "n_calls": 160,
-  "n_turns": 1221,
+  "n_turns": 1083,
   "percentiles": [
     10.0,
     90.0
   ],
   "anchors": {
     "f0_cv": [
-      0.21303,
-      0.47862
+      0.21314,
+      0.38909
     ],
     "f0_span": [
-      0.72867,
-      1.41406
+      0.5504,
+      1.1759
     ],
     "emphasis_var": [
-      2.03095,
-      7.6031
+      1.8957,
+      33.37139
     ],
     "rate_std": [
-      0.364,
-      1.12592
+      0.29702,
+      1.28713
     ]
   },
   "medians": {
     "f0_cv": {
-      "human": 0.37825,
-      "synthetic": 0.28722
+      "human": 0.27991,
+      "synthetic": 0.27163
     },
     "f0_span": {
-      "human": 1.22673,
-      "synthetic": 0.96949
+      "human": 0.81416,
+      "synthetic": 0.8094
     },
     "emphasis_var": {
-      "human": 5.25219,
-      "synthetic": 4.74865
+      "human": 4.95875,
+      "synthetic": 5.81626
     },
     "rate_std": {
-      "human": 0.7801,
-      "synthetic": 0.63129
+      "human": 0.74039,
+      "synthetic": 0.76245
     }
   },
   "direction_ok": {
     "f0_cv": true,
     "f0_span": true,
-    "emphasis_var": true,
-    "rate_std": true
+    "emphasis_var": false,
+    "rate_std": false
   },
   "status": "calibrated"
 }

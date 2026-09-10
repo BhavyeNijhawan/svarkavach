@@ -1,27 +1,27 @@
 {
   "entities_per_type": {
-    "OTP": 183,
-    "BANK_ENTITY": 319,
-    "AUTHORITY_CLAIM": 154,
-    "THREAT_DEADLINE": 307,
-    "PAYMENT_HANDLE": 109,
-    "PERSONAL_INFO_REQ": 114,
-    "MONEY_AMOUNT": 152
+    "OTP": 114,
+    "BANK_ENTITY": 197,
+    "AUTHORITY_CLAIM": 98,
+    "THREAT_DEADLINE": 189,
+    "PAYMENT_HANDLE": 75,
+    "PERSONAL_INFO_REQ": 63,
+    "MONEY_AMOUNT": 102
   },
   "cmi_by_class": {
     "scam": {
-      "cmi": 0.2242,
-      "switch_rate": 31.187,
-      "en_ratio": 0.2237,
-      "ent_lang_align": 0.6255,
-      "n_entity_tokens": 2331
+      "cmi": 0.2232,
+      "switch_rate": 31.445,
+      "en_ratio": 0.2222,
+      "ent_lang_align": 0.6181,
+      "n_entity_tokens": 1448
     },
     "benign": {
-      "cmi": 0.184,
-      "switch_rate": 26.151,
-      "en_ratio": 0.1872,
-      "ent_lang_align": 0.902,
-      "n_entity_tokens": 255
+      "cmi": 0.1883,
+      "switch_rate": 27.159,
+      "en_ratio": 0.1906,
+      "ent_lang_align": 0.8713,
+      "n_entity_tokens": 171
     }
   },
   "scam_scenarios": [
@@ -46,112 +46,112 @@
     "survey_call",
     "school_notice"
   ],
-  "n_calls": 480,
-  "n_turns": 5025,
-  "n_tokens": 62257,
-  "n_entities": 1338,
-  "n_scam": 240,
-  "n_benign": 240,
-  "n_hard_negatives": 151,
-  "n_mild_scams": 53,
+  "n_calls": 300,
+  "n_turns": 3145,
+  "n_tokens": 38637,
+  "n_entities": 838,
+  "n_scam": 151,
+  "n_benign": 149,
+  "n_hard_negatives": 93,
+  "n_mild_scams": 32,
   "entities": {
-    "OTP": 183,
-    "BANK_ENTITY": 319,
-    "AUTHORITY_CLAIM": 154,
-    "THREAT_DEADLINE": 307,
-    "PAYMENT_HANDLE": 109,
-    "PERSONAL_INFO_REQ": 114,
-    "MONEY_AMOUNT": 152
+    "OTP": 114,
+    "BANK_ENTITY": 197,
+    "AUTHORITY_CLAIM": 98,
+    "THREAT_DEADLINE": 189,
+    "PAYMENT_HANDLE": 75,
+    "PERSONAL_INFO_REQ": 63,
+    "MONEY_AMOUNT": 102
   },
   "acts": {
-    "AUTHORITY_ASSERT": 73,
-    "CLOSE": 480,
-    "CONFIRM": 694,
-    "DEADLINE": 155,
-    "GREET": 480,
-    "IDENTIFY_SELF": 467,
-    "INFORM": 494,
-    "INSTRUCT": 179,
-    "ISOLATE": 105,
-    "PRESSURE_ESCALATE": 191,
-    "PROBLEM_STATE": 187,
-    "REASSURE": 342,
-    "REQUEST_SENSITIVE": 271,
-    "SMALLTALK": 53,
-    "THREAT": 132,
-    "VICTIM_COMPLY": 194,
-    "VICTIM_QUESTION": 339,
-    "VICTIM_RESIST": 189
+    "AUTHORITY_ASSERT": 46,
+    "CLOSE": 300,
+    "CONFIRM": 428,
+    "DEADLINE": 99,
+    "GREET": 300,
+    "IDENTIFY_SELF": 292,
+    "INFORM": 296,
+    "INSTRUCT": 112,
+    "ISOLATE": 74,
+    "PRESSURE_ESCALATE": 113,
+    "PROBLEM_STATE": 119,
+    "REASSURE": 210,
+    "REQUEST_SENSITIVE": 171,
+    "SMALLTALK": 35,
+    "THREAT": 86,
+    "VICTIM_COMPLY": 127,
+    "VICTIM_QUESTION": 216,
+    "VICTIM_RESIST": 121
   },
   "scenarios": {
-    "appointment_reminder": 29,
-    "bank_reminder": 31,
-    "courier_customs": 23,
-    "customer_support": 29,
-    "delivery_otp": 31,
-    "digital_arrest": 25,
-    "electricity_disconnect": 23,
-    "fake_relative": 23,
-    "family_call": 31,
-    "job_offer": 23,
-    "kyc_freeze": 25,
-    "loan_approval": 24,
-    "lottery_prize": 25,
-    "otp_theft": 25,
-    "school_notice": 29,
-    "sim_block": 24,
-    "survey_call": 29,
-    "telemarketing": 31
+    "appointment_reminder": 18,
+    "bank_reminder": 19,
+    "courier_customs": 15,
+    "customer_support": 18,
+    "delivery_otp": 20,
+    "digital_arrest": 16,
+    "electricity_disconnect": 15,
+    "fake_relative": 15,
+    "family_call": 20,
+    "job_offer": 15,
+    "kyc_freeze": 16,
+    "loan_approval": 14,
+    "lottery_prize": 15,
+    "otp_theft": 16,
+    "school_notice": 18,
+    "sim_block": 14,
+    "survey_call": 18,
+    "telemarketing": 18
   },
   "cells": {
-    "clonedxbenign": 120,
-    "clonedxscam": 120,
-    "humanxbenign": 120,
-    "humanxscam": 120
+    "clonedxbenign": 74,
+    "clonedxscam": 76,
+    "humanxbenign": 75,
+    "humanxscam": 75
   },
   "cells_by_split": {
     "dev": {
       "clonedxbenign": 18,
-      "clonedxscam": 18,
-      "humanxbenign": 18,
-      "humanxscam": 18
+      "clonedxscam": 19,
+      "humanxbenign": 19,
+      "humanxscam": 19
     },
     "test": {
-      "clonedxbenign": 30,
-      "clonedxscam": 30,
-      "humanxbenign": 30,
-      "humanxscam": 30
+      "clonedxbenign": 18,
+      "clonedxscam": 19,
+      "humanxbenign": 19,
+      "humanxscam": 19
     },
     "train": {
-      "clonedxbenign": 72,
-      "clonedxscam": 72,
-      "humanxbenign": 72,
-      "humanxscam": 72
+      "clonedxbenign": 38,
+      "clonedxscam": 38,
+      "humanxbenign": 37,
+      "humanxscam": 37
     }
   },
   "splits": {
-    "dev": 72,
-    "test": 120,
-    "train": 288
+    "dev": 75,
+    "test": 75,
+    "train": 150
   },
   "speakers_per_split": {
-    "dev": 4,
+    "dev": 6,
     "test": 6,
-    "train": 14
+    "train": 12
   },
   "lang_tokens": {
-    "en": 9243,
-    "hi": 34839,
-    "univ": 18175
+    "en": 5751,
+    "hi": 21602,
+    "univ": 11284
   },
-  "mean_cmi": 0.204,
-  "switch_points": 12897,
-  "mean_turns_per_call": 10.469,
-  "mean_tokens_per_turn": 12.389,
-  "mean_duration_s": 51.888,
-  "total_duration_s": 24906.02,
+  "mean_cmi": 0.206,
+  "switch_points": 8159,
+  "mean_turns_per_call": 10.483,
+  "mean_tokens_per_turn": 12.285,
+  "mean_duration_s": 54.421,
+  "total_duration_s": 16326.178,
   "mean_coercion": {
-    "scam": 0.3536,
-    "benign": 0.1505
+    "scam": 0.3541,
+    "benign": 0.1503
   }
 }

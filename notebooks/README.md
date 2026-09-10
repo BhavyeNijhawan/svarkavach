@@ -1,15 +1,30 @@
 # Colab notebooks
 
-Everything the laptop cannot do. Each notebook clones this repository, runs on
-Colab's hardware, and downloads a small zip of JSON results that drops into
-`data/results/` on the laptop. The console's provenance table then shows which
-numbers came from which machine.
+**Start with `00_RUN_EVERYTHING.ipynb`.** It is the whole pipeline in one
+notebook: fetch the real corpora, build the Hindi anti-spoofing set, generate
+the Hinglish corpus with neural voices, train, evaluate, and hand the results
+back. Roughly 45 to 70 minutes. The other four go deeper on one piece each and
+are optional.
 
-Change `REPO_URL` at the top of the first code cell of every notebook to your
-own fork before running anything.
+Run it on Colab rather than a laptop because the corpus build holds a lot of
+audio at once. On an 8 GB machine the same run gets killed part way through.
+
+## The token
+
+The repo can be private. Put a GitHub Personal Access Token in Colab's
+**Secrets** panel (key icon, left sidebar) under the name `GH_PAT` with
+"Notebook access" on. A fine-grained token needs **Contents: read and write**
+on this one repository and nothing else.
+
+Use Secrets rather than pasting the token into a cell: a pasted token is saved
+inside the notebook file and travels with every copy of it. The notebook never
+prints the token and strips it from the git remote right after cloning, and it
+can push the finished results back to a `colab-results` branch so you do not
+have to shuffle zip files around.
 
 | notebook | needs | time | writes back |
 | --- | --- | --- | --- |
+| `00_RUN_EVERYTHING.ipynb` | GPU optional, a GH_PAT for a private repo | 45 to 70 min | everything below, plus trained models |
 | `01_setup_and_data.ipynb` | no GPU, 20 to 45 GB free disk | 3 min plus 1 to 2 h of downloading | `dataset_manifest.json` |
 | `02_antispoof_train.ipynb` | T4 GPU, notebook 01 first | 35 to 60 min | `antispoof_results.json`, `antispoof_branch_scores.json`, `data/models/antispoof_rawnet.pt` |
 | `03_asr_ner_intent.ipynb` | T4 GPU | 25 to 45 min | `ner_results.json`, `intent_results.json`, `asr_results.json`, `intent_branch_scores.json`, attention PNGs |
