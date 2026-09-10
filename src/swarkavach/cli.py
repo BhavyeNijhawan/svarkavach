@@ -67,6 +67,8 @@ def gen_corpus(
 def fetch_data(
     which: str = typer.Option("core", help="core | all | a comma separated list"),
     pairs: int = typer.Option(500, help="paired anti-spoof utterances to build, 0 to skip"),
+    robocall_audio: bool = typer.Option(
+        False, help="also fetch the 1.7 GB robocall WAVs. Only the transcripts are used"),
 ):
     """Download the real corpora and build the Hindi anti-spoofing pairs.
 
@@ -115,9 +117,34 @@ def fetch_data(
             if shutil.which("git") is None:
                 console.print("  [red]git not found, cannot clone the robocall set[/]")
                 continue
-            console.print(f"  {name}: cloning {spec['git']}")
-            r = subprocess.run(["git", "clone", "--depth", "1", spec["git"], str(dest)],
-                               capture_output=True, text=True)
+            # The pipeline only reads metadata.csv from this repo, which is
+            # 684 KB out of 1.7 GB. A blob-filtered clone fetches the tree and
+            # then only the files actually opened, so the default costs
+            # seconds instead of minutes and leaves Colab's disk alone. Pass
+            # --robocall-audio if you want the WAVs too.
+            if robocall_audio:
+                console.print(f"  {name}: cloning {spec['git']} with audio, 1.7 GB")
+                cmd = ["git", "clone", "--depth", "1", spec["git"], str(dest)]
+            else:
+                console.print(f"  {name}: cloning {spec['git']}, transcripts only")
+                cmd = ["git", "clone", "--depth", "1", "--filter=blob:none",
+                       "--no-checkout", spec["git"], str(dest)]
+            r = subprocess.run(cmd, capture_output=True, text=True)
+            if r.returncode == 0 and not robocall_audio:
+                for c in (["git", "sparse-checkout", "set", "--no-cone",
+                           "metadata.csv", "README.md", "LICENSE.md"],
+                          ["git", "checkout"]):
+                    r = subprocess.run(c, cwd=str(dest), capture_output=True, text=True)
+                    if r.returncode != 0:
+                        break
+                # older git without sparse-checkout: fall back to a plain one
+                if r.returncode != 0:
+                    console.print("    [dim]sparse checkout unavailable, "
+                                  "fetching the whole repo[/]")
+                    shutil.rmtree(dest, ignore_errors=True)
+                    r = subprocess.run(
+                        ["git", "clone", "--depth", "1", spec["git"], str(dest)],
+                        capture_output=True, text=True)
             console.print("    [green]done[/]" if r.returncode == 0
                           else f"    [red]failed: {r.stderr[-200:]}[/]")
 

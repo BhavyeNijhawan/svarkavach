@@ -19,16 +19,25 @@ pitch per speaker turns those five into something closer to twenty distinct
 sounding people, which the speaker-embedding consistency feature needs.
 
 **The human against cloned axis.** Every Edge voice is synthetic, so rendering
-both classes with it would leave the anti-spoofing branch nothing real to
-find. The cloned cells therefore go through `vocoder_artifacts` below, a
-magnitude-preserving phase vocoder re-synthesis that imposes the specific
-artefacts real voice cloning leaves: over-smoothed spectral envelope, regular
-phase, near-zero jitter and shimmer. Intelligibility survives because the
-magnitude spectrum is preserved.
+both classes identically would leave nothing to separate them. The separation
+is prosodic, through `turn_prosody` below. A human caller's rate, pitch and
+volume move with the arousal of the dialogue act they are performing, so a
+threat is delivered faster, higher and louder than an opening greeting. A
+cloned caller reads every line with almost the same contour, because that is
+what a text-to-speech system driven by a scripted playbook actually sounds
+like. Nothing is damaged and nothing is added on top, so both classes stay
+fully intelligible.
 
-Be clear about what that buys and what it does not. Offline, both classes are
-machine generated, so the local anti-spoofing numbers measure "can it find
-vocoder artefacts", not "can it tell a person from a machine". The real
+An earlier version pushed the cloned cells through `vocoder_artifacts` below
+instead. That separated the classes more strongly and it sounded terrible,
+which is the wrong trade for a corpus whose other job is to be listened to.
+The vocoder is still here and still used, but only for the anti-spoofing pairs
+built in `datasets.py`, where the audio feeds a detector and no one plays it
+back.
+
+Be clear about what the offline corpus buys and what it does not. Both classes
+are machine generated, so its anti-spoofing numbers measure "can it find a
+flat delivery", not "can it tell a person from a machine". The real
 human-against-spoof evaluation is ASVspoof 2019 LA and In-the-Wild, in
 notebook 02. The report says this rather than implying otherwise.
 
@@ -41,7 +50,9 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import os
 import re
+import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -89,24 +100,66 @@ def _stable_hash(*parts: Any) -> int:
 
 
 def voice_for_speaker(speaker_id: str, seed: int = 0) -> Dict[str, Any]:
-    """A stable voice, rate and pitch for one speaker id.
+    """A stable voice, rate, pitch and volume for one speaker id.
 
-    Five voices is not many. Rate and pitch offsets multiply that out so two
-    calls from different speakers do not sound like the same person, which
-    matters because the speaker-embedding consistency feature is measuring
-    exactly that.
+    Five base voices is not many, so the rate, pitch and volume offsets do the
+    rest of the work. The ranges are wide enough that two speakers rarely
+    sound like the same person, which matters both for the demo and for the
+    speaker-embedding consistency feature, which is measuring exactly that.
+
+    Stable for a given speaker id, so the same person sounds the same across
+    every call they appear in.
     """
     h = _stable_hash("voice", speaker_id, seed)
     name, gender, script = VOICE_POOL[h % len(VOICE_POOL)]
-    rate = -12 + (h >> 8) % 27           # -12% to +14%
-    pitch = -9 + (h >> 16) % 19          # -9Hz to +9Hz
+    rate = -18 + (h >> 8) % 37           # -18% to +18%
+    pitch = -14 + (h >> 16) % 29         # -14Hz to +14Hz
+    volume = -8 + (h >> 24) % 17         # -8% to +8%
     return {
         "voice": name,
         "gender": gender,
         "script": script,
         "rate": f"{rate:+d}%",
         "pitch": f"{pitch:+d}Hz",
+        "volume": f"{volume:+d}%",
+        "rate_n": rate,
+        "pitch_n": pitch,
         "speaker_id": speaker_id,
+    }
+
+
+def turn_prosody(voice: Dict[str, Any], arousal: float, flat: bool) -> Dict[str, str]:
+    """Per-turn rate and pitch, so delivery tracks what is being said.
+
+    A person threatening you speeds up and raises pitch. A text-to-speech
+    voice reading a script does not: it gives a threat the same contour it
+    gives a weather report. `flat=True` reproduces that, and it is what makes
+    the cloned cells detectable by the prosody-intent feature.
+
+    This replaced a vocoder re-synthesis that imposed the difference by
+    damaging the audio. That worked for the detector and sounded terrible,
+    which is the wrong trade for a corpus whose other job is to be listened
+    to. Modulating the delivery is both more realistic and cleaner.
+    """
+    a = max(0.0, min(1.0, float(arousal)))
+    base_rate = int(voice.get("rate_n", 0))
+    base_pitch = int(voice.get("pitch_n", 0))
+
+    if flat:
+        # not exactly constant: real systems do respond a little to sentence
+        # type and punctuation, just far less than a person
+        rate = base_rate + int(round(2 * (a - 0.5)))
+        pitch = base_pitch + int(round(2 * (a - 0.5)))
+        volume = 0
+    else:
+        rate = base_rate + int(round(16 * (a - 0.35)))
+        pitch = base_pitch + int(round(14 * (a - 0.35)))
+        volume = int(round(12 * (a - 0.35)))
+
+    return {
+        "rate": f"{max(-40, min(40, rate)):+d}%",
+        "pitch": f"{max(-40, min(40, pitch)):+d}Hz",
+        "volume": f"{max(-20, min(20, volume)):+d}%",
     }
 
 
@@ -427,20 +480,22 @@ def _record_failure(text: str, voice: str, exc: BaseException) -> None:
         FAILURES.append(msg)
 
 
-def _cache_path(text: str, voice: str, rate: str, pitch: str) -> Path:
+def _cache_path(text: str, voice: str, rate: str, pitch: str,
+                volume: str = "+0%") -> Path:
     key = hashlib.sha1(
-        "|".join([text, voice, rate, pitch]).encode("utf-8")
+        "|".join([text, voice, rate, pitch, volume]).encode("utf-8")
     ).hexdigest()[:20]
     return CACHE_DIR / f"{key}.wav"
 
 
 async def _synth_one(
-    text: str, voice: str, rate: str, pitch: str, sr: int, sem: asyncio.Semaphore
+    text: str, voice: str, rate: str, pitch: str, sr: int,
+    sem: asyncio.Semaphore, volume: str = "+0%"
 ) -> Optional[np.ndarray]:
     """One line of speech, from the cache when possible."""
     import edge_tts  # type: ignore
 
-    path = _cache_path(text, voice, rate, pitch)
+    path = _cache_path(text, voice, rate, pitch, volume)
     if path.exists():
         try:
             x, _ = read_audio(path, sr=sr)
@@ -450,53 +505,76 @@ async def _synth_one(
 
     # the directory has to exist before edge-tts writes into it, not after
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".mp3.part")
-    last_error: Optional[BaseException] = None
-    async with sem:
-        for attempt in range(len(RETRY_BACKOFF) + 1):
-            try:
-                comm = edge_tts.Communicate(text, voice, rate=rate, pitch=pitch)
-                await comm.save(str(tmp))
-                if tmp.exists() and tmp.stat().st_size > 512:
-                    last_error = None
-                    break
-                raise RuntimeError(f"empty response ({tmp.stat().st_size if tmp.exists() else 0} bytes)")
-            except Exception as exc:
-                last_error = exc
-                if attempt >= len(RETRY_BACKOFF):
-                    _record_failure(text, voice, exc)
-                    return None
-                await asyncio.sleep(RETRY_BACKOFF[attempt])
-        await asyncio.sleep(REQUEST_SPACING_S)
-    if last_error is not None:
-        return None
+    # Unique per call, not per cache key. The batch can contain the same line
+    # twice (the template grammar repeats), and two tasks sharing one temp
+    # path means one overwrites the other mid-download. That produced a bug
+    # that looked like random corruption and was not.
+    tmp = path.with_suffix(f".{os.getpid()}.{uuid.uuid4().hex[:8]}.mp3.part")
 
-    try:
-        x, _ = read_audio(tmp, sr=sr)
-        x = rms_normalize(x, target_dbfs=-20.0)
-        CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        write_wav(path, x, sr)
-        return x
-    except Exception:
-        return None
-    finally:
+    def _cleanup() -> None:
         try:
             tmp.unlink()
         except OSError:
             pass
 
+    try:
+        last_error: Optional[BaseException] = None
+        async with sem:
+            for attempt in range(len(RETRY_BACKOFF) + 1):
+                try:
+                    comm = edge_tts.Communicate(text, voice, rate=rate, pitch=pitch,
+                                                volume=volume)
+                    await comm.save(str(tmp))
+                    if tmp.exists() and tmp.stat().st_size > 512:
+                        last_error = None
+                        break
+                    raise RuntimeError(
+                        f"empty response ({tmp.stat().st_size if tmp.exists() else 0} bytes)")
+                except Exception as exc:
+                    last_error = exc
+                    if attempt >= len(RETRY_BACKOFF):
+                        _record_failure(text, voice, exc)
+                        return None
+                    await asyncio.sleep(RETRY_BACKOFF[attempt])
+            await asyncio.sleep(REQUEST_SPACING_S)
+        if last_error is not None:
+            return None
+
+        try:
+            x, _ = read_audio(tmp, sr=sr)
+            x = rms_normalize(x, target_dbfs=-20.0)
+            CACHE_DIR.mkdir(parents=True, exist_ok=True)
+            write_wav(path, x, sr)
+            return x
+        except Exception:
+            return None
+    finally:
+        # Every exit deletes it, including the ones that give up after the last
+        # retry. Missing this left 530 empty .part files in the cache, and they
+        # were committed to the repo before anyone noticed.
+        _cleanup()
+
 
 async def synth_many(
-    items: Sequence[Tuple[str, str, str, str]], sr: int = TARGET_SR
+    items: Sequence[Tuple], sr: int = TARGET_SR
 ) -> List[Optional[np.ndarray]]:
-    """Synthesise (text, voice, rate, pitch) tuples concurrently."""
+    """Synthesise items concurrently.
+
+    Each item is (text, voice, rate, pitch) or (text, voice, rate, pitch,
+    volume). The four-element form is still accepted so older callers keep
+    working.
+    """
     sem = asyncio.Semaphore(MAX_CONCURRENCY)
-    tasks = [_synth_one(t, v, r, p, sr, sem) for (t, v, r, p) in items]
+    tasks = []
+    for it in items:
+        t, v, r, p = it[0], it[1], it[2], it[3]
+        vol = it[4] if len(it) > 4 else "+0%"
+        tasks.append(_synth_one(t, v, r, p, sr, sem, vol))
     return list(await asyncio.gather(*tasks))
 
 
 def synth_batch(
-    items: Sequence[Tuple[str, str, str, str]], sr: int = TARGET_SR
+    items: Sequence[Tuple], sr: int = TARGET_SR
 ) -> List[Optional[np.ndarray]]:
     """Blocking wrapper around `synth_many`, safe to call from normal code."""
     try:

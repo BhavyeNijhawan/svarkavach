@@ -333,17 +333,29 @@ order of what they settle:
    transcripts against ASR transcripts.
 4. **Intent** (`intent_results.json`). Rule baseline against TF-IDF.
 5. **Robustness** (`robustness_results.json`). End-to-end AUC per codec.
-6. **Time to detection** (`ttd_results.json`).
-7. **Calibration** (`calibration.json`). This one is a precondition, not a
+6. **Out of domain** (`robocall_ood.json`). The one number here that is not
+   measured on our own corpus. The intent branch, trained only on generated
+   Hinglish dialogue, is run over 1,413 transcripts of real illegal robocalls
+   from the FTC evidence exhibits: English rather than Hinglish, recorded
+   monologue rather than two-party conversation, written by actual fraudsters,
+   and nothing in this project was tuned on them. Reported as recall at the
+   operating threshold chosen on dev, broken down by language, because the set
+   has no benign half. A cross-domain AUC against our own benign calls is also
+   recorded and should be read as an upper bound, since a classifier could
+   separate those two on domain alone.
+7. **Time to detection** (`ttd_results.json`).
+8. **Calibration** (`calibration.json`). This one is a precondition, not a
    footnote: late fusion over uncalibrated inputs tracks whichever branch is
    more confident rather than whichever is more correct.
 
 The corpus is template-generated and therefore more regular than real speech,
 so absolute numbers on it are optimistic. What the corpus can honestly settle
 is the relative question, which is whether the cross-modal features add
-anything over late fusion of two scores. Real-data numbers come from the Colab
-notebooks on ASVspoof 2019 LA and the In-the-Wild set, and the console's
-provenance table marks which is which.
+anything over late fusion of two scores. Real-data numbers come from three
+places that the corpus does not touch: the voice branch on ASVspoof 2019 LA
+and the In-the-Wild set, the paired Hindi set built from GramVaani recordings,
+and the intent branch on the FTC robocall transcripts. The console's
+provenance table marks which result came from which.
 
 ## 7. Limitations
 

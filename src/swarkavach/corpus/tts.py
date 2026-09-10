@@ -188,10 +188,14 @@ def _render_edge(call: Call, sr: int, seed: int = 0) -> Tuple[List[np.ndarray], 
     end produces the right acoustic statistics but no intelligible speech,
     which is fine for training a detector and useless for a demo.
 
-    The cloned cells run through an LPC vocoder re-synthesis on the CALLER's
-    turns only, since it is the caller whose voice is supposedly cloned. That
-    imposes the low jitter, low shimmer and high harmonic-to-noise ratio that
-    real vocoder-based cloning leaves, while keeping the words intelligible.
+    The cloned cells are separated from the human ones by delivery, not by
+    damage. A human caller's rate, pitch and volume shift turn by turn with
+    the arousal of the dialogue act; a cloned caller holds nearly the same
+    contour from the greeting through the threat. The caller's turns are the
+    only ones treated this way, since it is the caller whose voice is
+    supposedly cloned, and the callee is a real person on the line in both
+    classes.
+
     Both classes are machine generated here, so see the module docstring in
     neural_tts.py for what the local anti-spoofing numbers do and do not mean.
     """
@@ -199,13 +203,30 @@ def _render_edge(call: Call, sr: int, seed: int = 0) -> Tuple[List[np.ndarray], 
 
     caller_v = N.voice_for_speaker(call.speaker_id, seed)
     callee_v = N.voice_for_speaker(f"{call.speaker_id}_callee", seed)
+    # a caller and the person they called must not sound like the same person
+    if callee_v["voice"] == caller_v["voice"]:
+        callee_v = N.voice_for_speaker(f"{call.speaker_id}_callee2", seed + 7)
     caller_is_synthetic = call.label_voice == "synthetic"
 
     items = []
+    per_turn_meta = []
     for turn in call.turns:
-        v = caller_v if turn.speaker == "caller" else callee_v
+        is_caller = turn.speaker == "caller"
+        v = caller_v if is_caller else callee_v
+        # Arousal from the dialogue act, not from the words. The
+        # prosody-intent feature builds lexical arousal from the fraud
+        # lexicon, so driving the rendering from that same lexicon would make
+        # the evaluation circular.
+        arousal = float(COERCION_RANK.get(turn.act, 0.25))
+        if not is_caller:
+            arousal = 0.30 if turn.act == "VICTIM_RESIST" else 0.18
+        # A cloned caller reads everything with the same contour. The callee
+        # is a real person on the line either way, so they always modulate.
+        flat = bool(caller_is_synthetic and is_caller)
+        pr = N.turn_prosody(v, arousal, flat)
         items.append((N.prepare_text(turn.text, v["script"]),
-                      v["voice"], v["rate"], v["pitch"]))
+                      v["voice"], pr["rate"], pr["pitch"], pr["volume"]))
+        per_turn_meta.append({"arousal": round(arousal, 3), "flat": flat, **pr})
 
     rendered = N.synth_batch(items, sr=sr)
     n_failed = sum(1 for r in rendered if r is None)
@@ -230,20 +251,25 @@ def _render_edge(call: Call, sr: int, seed: int = 0) -> Tuple[List[np.ndarray], 
             # it becomes a short silence rather than disappearing
             seg = np.zeros(int(0.5 * sr), dtype=np.float32)
         is_caller = turn.speaker == "caller"
-        vocoded = bool(caller_is_synthetic and is_caller)
-        if vocoded:
-            seg = N.vocoder_artifacts(seg, sr)
+        # No vocoder here on purpose. It made the cloned caller sound badly
+        # damaged, and a corpus whose other job is to be listened to should
+        # not be paying for detector separation with audio quality. The
+        # cloned cells are instead rendered with a flat contour, which is what
+        # a real text-to-speech voice actually does. The vocoder still exists
+        # in neural_tts for the anti-spoofing pairs, where nobody listens.
+        meta = per_turn_meta[len(segments)] if len(segments) < len(per_turn_meta) else {}
         segments.append(rms_normalize(np.asarray(seg, dtype=np.float32), target_dbfs=-20.0))
         per_turn.append({
             "index": turn.index, "speaker": turn.speaker,
-            "synthetic": vocoded, "n_samples": int(segments[-1].size),
+            "synthetic": bool(caller_is_synthetic and is_caller),
+            "n_samples": int(segments[-1].size), **meta,
         })
 
     return segments, {
-        "caller_voice": {k: caller_v[k] for k in ("voice", "rate", "pitch", "script")},
-        "callee_voice": {k: callee_v[k] for k in ("voice", "rate", "pitch", "script")},
+        "caller_voice": {k: caller_v[k] for k in ("voice", "rate", "pitch", "volume", "script")},
+        "callee_voice": {k: callee_v[k] for k in ("voice", "rate", "pitch", "volume", "script")},
         "caller_synthetic": bool(caller_is_synthetic),
-        "cloned_via": "lpc_vocoder_resynthesis" if caller_is_synthetic else None,
+        "cloned_via": "flat_prosody_contour" if caller_is_synthetic else None,
         "turns": per_turn,
         "n_failed": n_failed,
         "errors": list(N.FAILURES)[:3],

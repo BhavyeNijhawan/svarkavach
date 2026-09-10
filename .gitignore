@@ -32,3 +32,7 @@ desktop.ini
 data/corpus/calls/
 data/corpus/audio/
 data/uploads/
+
+# synthesis temp files. These leaked into a commit once because the cleanup
+# only ran on the success path; see neural_tts._synth_one.
+*.part

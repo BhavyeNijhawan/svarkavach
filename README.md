@@ -98,7 +98,7 @@ rests on real speech and which rests on generated speech.
 | source | what it is | what it is used for | licence |
 | --- | --- | --- | --- |
 | **GramVaani**, OpenSLR 118 | 2,884 transcribed real Hindi **telephone** utterances, 7.6 hours, 2,726 speakers, 1,728 natively 8 kHz, with gender and accent labels | the bonafide side of the voice branch | free for academic use |
-| **NCSU WSPR robocalls** | 1,432 genuine illegal robocalls with transcripts | out-of-domain test for the intent branch, real fraud scripts nothing was tuned on | public domain (FTC evidence) |
+| **NCSU WSPR robocalls** | 1,432 genuine illegal robocalls with transcripts | out-of-domain test for the intent branch, real fraud scripts nothing was tuned on. Written to `robocall_ood.json` | public domain (FTC evidence) |
 | **CallForge**, in this repo | generated Hinglish dialogues with gold BIO, acts and language tags, rendered with neural voices | the fusion grid and the live monitor, where audio and transcript have to match | MIT, with the code |
 
 Both downloads are direct HTTP with no account and no approval form, which was
@@ -106,7 +106,9 @@ a hard constraint on this project. Fetch them with:
 
 ```bash
 python -m swarkavach.datasets          # shows what is on disk
-swarkavach fetch-data                  # downloads GramVaani and the robocalls
+swarkavach fetch-data                  # GramVaani, plus the robocall transcripts
+                                       # (add --robocall-audio for the 1.7 GB of WAVs,
+                                       #  which nothing in the pipeline reads)
 ```
 
 ### The Hindi anti-spoofing set

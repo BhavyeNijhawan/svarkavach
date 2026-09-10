@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import platform
+import re
 import sys
 import time
 from datetime import datetime, timezone
@@ -26,7 +27,7 @@ import numpy as np
 from . import config
 from .config import SETTINGS, result_path
 from .schema import (
-    ABLATION_ARMS, Call, EntitySpan, FUSION_FEATURE_NAMES, decode_bio,
+    ABLATION_ARMS, Call, EntitySpan, FUSION_FEATURE_NAMES, Turn, decode_bio,
     feature_vector,
 )
 
@@ -347,6 +348,18 @@ def run_full_evaluation(
     if intent_res:
         _write("intent_results.json", intent_res)
         prov("intent_results.json", "call level, held-out split")
+
+    # --------------------------------------- out of domain: real robocalls
+    say("scoring real robocall transcripts, out of domain")
+    ood = _eval_robocall_ood(p, test, threshold, say)
+    if ood:
+        _write("robocall_ood.json", ood)
+        prov("robocall_ood.json",
+             f"{ood['n_robocalls']} real FTC robocall transcripts, nothing tuned on them")
+        best = max((m.get("recall_at_threshold", 0) for m in ood["models"].values()),
+                   default=None)
+        if best is not None:
+            headline["robocall recall, out of domain"] = best
 
     # ------------------------------------------------------- robustness
     if not skip_robustness and len(codecs) > 1:
@@ -674,6 +687,101 @@ def _eval_intent(p, calls: Sequence[Call], threshold: float, say) -> Optional[Di
             "confusion": {k: b[k] for k in ("tp", "fp", "fn", "tn")},
         }
     return out if out["models"] else None
+
+
+def _eval_robocall_ood(p, benign: Sequence[Call], threshold: float,
+                       say) -> Optional[Dict[str, Any]]:
+    """Score the intent branch on 1,431 real illegal robocall transcripts.
+
+    This is the only genuinely out-of-domain number in the project. Everything
+    else is measured on calls this codebase generated, which bounds how much
+    they can tell you. These scripts were written by actual fraudsters, they
+    are English rather than Hinglish, and they are recorded monologues rather
+    than two-party conversation. Nothing here was tuned on them.
+
+    Read the recall and treat the AUC with suspicion. The robocall set has no
+    benign half, so the negatives borrowed here are our own benign calls, from
+    a different language and a different recording setup. A classifier could
+    separate those two on domain alone, so the AUC is an upper bound and the
+    recall at the operating threshold is the honest figure.
+    """
+    from .datasets import robocall_transcripts
+    from .fusion.featurize import _turn_intent, ModelBundle
+
+    rows = robocall_transcripts()
+    if len(rows) < 50:
+        say("  no robocall transcripts on disk, skipping the out-of-domain test")
+        return None
+
+    candidates: Dict[str, Any] = {}
+    if p.models.rules is not None:
+        candidates["rules"] = ModelBundle(rules=p.models.rules)
+    if p.models.intent is not None:
+        candidates["tfidf"] = ModelBundle(intent=p.models.intent, rules=p.models.rules)
+    if not candidates:
+        return None
+
+    def score_turns(bundle, turns) -> float:
+        a = np.asarray([_turn_intent(bundle, t) for t in turns]) if turns else np.zeros(1)
+        return float(np.clip(0.6 * a.max() + 0.4 * a.mean(), 0, 1))
+
+    # one Turn per sentence, so a long recorded script is scored the way a
+    # multi-turn call is rather than as one enormous utterance
+    pos_turns, pos_lang = [], []
+    for r in rows:
+        chunks = [c.strip() for c in re.split(r"(?<=[.!?])\s+", r["transcript"]) if c.strip()]
+        chunks = [c for c in chunks if len(c.split()) >= 2] or [r["transcript"]]
+        try:
+            pos_turns.append([Turn(index=i, speaker="caller", text=c)
+                              for i, c in enumerate(chunks[:24])])
+            pos_lang.append(r.get("language", "en"))
+        except Exception:
+            continue
+
+    neg_turns = [c.caller_turns() for c in benign if not c.label_scam]
+
+    out: Dict[str, Any] = {
+        "n_robocalls": len(pos_turns),
+        "n_by_language": {l: pos_lang.count(l) for l in sorted(set(pos_lang))},
+        "n_benign_controls": len(neg_turns),
+        "threshold": threshold,
+        "note": ("real FTC robocall evidence, English monologue. No benign "
+                 "half exists, so the negatives are this project's own benign "
+                 "Hinglish calls and the AUC is a cross-domain upper bound."),
+        "models": {}, "generated": _now(),
+    }
+
+    for name, bundle in candidates.items():
+        ps = np.asarray([score_turns(bundle, t) for t in pos_turns])
+        detected = int((ps >= threshold).sum())
+        row = {
+            "recall_at_threshold": round(detected / max(len(ps), 1), 4),
+            "n_detected": detected,
+            "score_mean": round(float(ps.mean()), 4),
+            "score_median": round(float(np.median(ps)), 4),
+            "score_p10": round(float(np.percentile(ps, 10)), 4),
+            "score_p90": round(float(np.percentile(ps, 90)), 4),
+        }
+        # the set is not all English. Splitting it out keeps a handful of
+        # Mandarin scripts from quietly depressing a number the report reads
+        # as an English result.
+        by_lang = {}
+        for lang in sorted(set(pos_lang)):
+            m = np.asarray([l == lang for l in pos_lang])
+            if m.sum():
+                by_lang[lang] = {"n": int(m.sum()),
+                                 "recall": round(float((ps[m] >= threshold).mean()), 4)}
+        row["by_language"] = by_lang
+        if neg_turns:
+            ns = np.asarray([score_turns(bundle, t) for t in neg_turns])
+            sc = np.concatenate([ps, ns])
+            y = np.concatenate([np.ones(len(ps), int), np.zeros(len(ns), int)])
+            row["cross_domain_auc"] = round(roc_auc(sc, y), 4)
+            row["benign_score_mean"] = round(float(ns.mean()), 4)
+            row["benign_false_alarm"] = round(float((ns >= threshold).mean()), 4)
+        out["models"][name] = row
+
+    return out
 
 
 def _eval_robustness(p, calls, model, codecs, threshold, say) -> Optional[Dict[str, Any]]:

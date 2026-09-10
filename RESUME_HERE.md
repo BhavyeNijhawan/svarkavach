@@ -31,7 +31,7 @@ of call it needed before raising an alert.
 | source | what | used for |
 | --- | --- | --- |
 | GramVaani (OpenSLR 118) | 2,884 real Hindi telephone utterances, 7.6 h, 2,726 speakers, gender and accent labels | bonafide side of the voice branch |
-| NCSU WSPR robocalls | 1,432 genuine scam robocalls with transcripts | out-of-domain intent test |
+| NCSU WSPR robocalls | 1,432 genuine scam robocalls with transcripts | out-of-domain intent test, written to `robocall_ood.json`. Transcripts only, the clone is blob-filtered to 700 KB |
 | CallForge (this repo) | generated Hinglish dialogues, gold BIO, acts, language tags | fusion grid and the live demo |
 
 The anti-spoofing pairs are built here because no public Hindi anti-spoofing
@@ -124,6 +124,31 @@ verdict goes into the manifest, so this cannot silently come back.
   and light theme left it unreadable because the SVG baked in dark-theme
   colours at render time.
 
+## Running it
+
+**Training and evaluation happen on Colab, not on this machine.** That was the
+constraint from the start and it has not changed. Open
+`notebooks/00_RUN_EVERYTHING.ipynb` in Colab, point it at the repo, run it top
+to bottom. Locally, keep to the fast checks: `py_compile`, the notebook syntax
+sweep, and `tests/test_checkpoints.py`, which needs neither a corpus nor a
+network. Anything that generates audio or fits a model belongs on Colab.
+
+Everything expensive is checkpointed to Google Drive as it is produced, under
+`MyDrive/swarkavach_checkpoints/`, and restored at the start of the next run.
+A disconnect costs the stage that was in flight and nothing before it. The
+speech cache is saved even when generation fails partway, since that is the
+hour you would otherwise repeat. Set `FORCE_REBUILD = ["corpus"]` in the Drive
+cell to redo a stage anyway. Total footprint is about 1 GB:
+
+| artifact | size | what a loss costs |
+| --- | --- | --- |
+| tts_cache | 440 MB | about an hour of rate-limited synthesis |
+| corpus | 410 MB | 10 minutes, given the cache |
+| raw | 160 MB | 5 minutes of download |
+| pairs | 45 MB | 15 minutes |
+| models | 5 MB | 15 minutes of training |
+| robocall, results | 1 MB | seconds |
+
 ## Open
 
 **The numbers in `data/results/` are from before these fixes. Treat them as
@@ -140,6 +165,9 @@ Still to do after that:
 3. Watch the training log for the anchor warning. If it says a component reads
    higher for synthetic speech than human, the headline feature is partly
    cancelling itself and the component needs replacing, as `energy_std` did.
-4. Push to GitHub and run `python scripts/set_repo_url.py <your repo>` so the
-   five Colab notebooks clone the right place.
-5. Open the console and watch a call whose audio matches its subtitles.
+4. Open the console and watch a call whose audio matches its subtitles.
+5. Read `robocall_ood.json`. Before the fixes, the TF-IDF intent model flagged
+   74.7 percent of 1,413 real FTC robocall scripts at threshold 0.5 while the
+   Hinglish rule lexicon managed 13.4 percent, which is the expected shape:
+   the lexicon is language-specific and the learned model is not. Both numbers
+   need re-measuring after a clean training run.

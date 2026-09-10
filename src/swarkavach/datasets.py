@@ -275,6 +275,40 @@ def gramvaani_utterances(
 # --------------------------------------------------------------------------
 
 
+def robocall_transcripts(limit: Optional[int] = None) -> List[Dict[str, Any]]:
+    """The robocall transcripts alone, without touching the audio.
+
+    `robocall_calls` walks the whole clone to pair each row with its WAV, which
+    means 1.7 GB has to be on disk. The out-of-domain intent test only needs
+    the words, and metadata.csv is 684 KB, so this reads that file and stops.
+    That is also what lets the fetch step skip the audio entirely.
+    """
+    root = RAW_DIR / DATASETS["robocall"]["dir"]
+    meta = root / "metadata.csv"
+    if not meta.exists():
+        found = next(root.rglob("metadata.csv"), None) if root.exists() else None
+        if found is None:
+            return []
+        meta = found
+
+    out: List[Dict[str, Any]] = []
+    with open(meta, newline="", encoding="utf-8", errors="replace") as fh:
+        for r in csv.DictReader(fh):
+            text = (r.get("transcript") or "").strip()
+            # a handful of rows are empty or a single word of hold music
+            if len(text.split()) < 4:
+                continue
+            out.append({
+                "id": Path((r.get("file_name") or "").strip()).stem or f"rc{len(out)}",
+                "transcript": text,
+                "language": (r.get("language") or "en").strip(),
+                "case": (r.get("case_details") or "").strip(),
+            })
+            if limit and len(out) >= limit:
+                break
+    return out
+
+
 def robocall_calls(limit: Optional[int] = None) -> List[Dict[str, Any]]:
     """Real illegal robocalls with their transcripts.
 
