@@ -1,0 +1,84 @@
+{
+  "arms": [
+    "audio_only",
+    "text_only",
+    "late_fusion",
+    "full"
+  ],
+  "cells": [
+    "humanxbenign",
+    "humanxscam",
+    "clonedxbenign",
+    "clonedxscam"
+  ],
+  "detection_rate": {
+    "audio_only": {
+      "humanxbenign": 1.0,
+      "humanxscam": 0.0333,
+      "clonedxbenign": 1.0,
+      "clonedxscam": 0.0
+    },
+    "text_only": {
+      "humanxbenign": 1.0,
+      "humanxscam": 1.0,
+      "clonedxbenign": 1.0,
+      "clonedxscam": 1.0
+    },
+    "late_fusion": {
+      "humanxbenign": 1.0,
+      "humanxscam": 1.0,
+      "clonedxbenign": 1.0,
+      "clonedxscam": 1.0
+    },
+    "full": {
+      "humanxbenign": 1.0,
+      "humanxscam": 1.0,
+      "clonedxbenign": 1.0,
+      "clonedxscam": 1.0
+    }
+  },
+  "overall": {
+    "audio_only": {
+      "auc": 0.6101,
+      "accuracy": 0.5083,
+      "f1": 0.0328,
+      "precision": 1.0,
+      "recall": 0.0167,
+      "eer": 0.4167
+    },
+    "text_only": {
+      "auc": 1.0,
+      "accuracy": 1.0,
+      "f1": 1.0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "eer": 0.0
+    },
+    "late_fusion": {
+      "auc": 1.0,
+      "accuracy": 1.0,
+      "f1": 1.0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "eer": 0.0
+    },
+    "full": {
+      "auc": 1.0,
+      "accuracy": 1.0,
+      "f1": 1.0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "eer": 0.0
+    }
+  },
+  "n_per_cell": {
+    "humanxbenign": 30,
+    "humanxscam": 30,
+    "clonedxbenign": 30,
+    "clonedxscam": 30
+  },
+  "threshold": 0.65,
+  "split": "test",
+  "n_test": 120,
+  "generated": "2026-09-10 08:01 UTC"
+}

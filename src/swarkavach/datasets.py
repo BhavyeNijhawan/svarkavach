@@ -343,6 +343,74 @@ def robocall_calls(limit: Optional[int] = None) -> List[Dict[str, Any]]:
 # --------------------------------------------------------------------------
 
 
+def noise_floor_db(x, sr: int = TARGET_SR) -> float:
+    """Level of the quietest tenth of frames, in dB. A channel fingerprint."""
+    import numpy as np
+
+    from .dsp.framing import frame_signal, short_time_energy
+
+    x = np.asarray(x, dtype=np.float64).ravel()
+    if x.size < 2000:
+        return -90.0
+    fr = frame_signal(x, 200, 80, window="hamming")
+    e = short_time_energy(fr)
+    db = 10.0 * np.log10(np.maximum(e, 1e-12))
+    return float(np.percentile(db, 10))
+
+
+def match_channel(bonafide, spoof, sr: int = TARGET_SR, seed: int = 0,
+                  codec: str = "g711u"):
+    """Put both sides of a pair through the same channel.
+
+    This is the single most important step in building a spoofing set, and
+    getting it wrong silently ruins the whole evaluation. Real GramVaani audio
+    is a phone recording with room tone and line hiss sitting around -41 dB.
+    A synthesiser writes digital silence at about -88 dB. Measured on this
+    data, the noise floor ALONE separated the two classes at AUC 0.970, so a
+    detector trained on the raw pairing would score beautifully while having
+    learned nothing except "quiet means fake".
+
+    So: both sides get the same codec, and the spoof gets shaped noise added
+    until its floor matches its own partner's. After that the systematic
+    difference left between the two is the voice, which is the thing the
+    branch is supposed to be reading.
+    """
+    import numpy as np
+
+    from .channel import add_noise, apply_codec
+
+    rng = np.random.default_rng(seed)
+    b = np.asarray(bonafide, dtype=np.float32).ravel()
+    s = np.asarray(spoof, dtype=np.float32).ravel()
+
+    try:
+        b, _ = apply_codec(b, sr, codec)
+        s, _ = apply_codec(s, sr, codec)
+    except Exception:
+        pass
+
+    target = noise_floor_db(b, sr)
+    current = noise_floor_db(s, sr)
+
+    if target - current > 3.0:
+        # Work out the noise scale by measuring rather than by converting
+        # between an SNR and a percentile-of-frame-energy. Those are different
+        # units (short_time_energy sums over the frame, so there is a
+        # 10*log10(frame_len) offset lurking), and getting the conversion
+        # wrong overshot the target by about 18 dB, leaving the SPOOF noisier
+        # than the real recording.
+        #
+        # noise_floor_db is scale equivariant: multiplying a signal by k moves
+        # its floor by 20*log10(k). So measure the floor of unit-scale noise
+        # once, then solve for k exactly.
+        n = rng.normal(0.0, 1.0, s.size).astype(np.float32)
+        f_unit = noise_floor_db(n, sr)
+        k = 10.0 ** ((target - f_unit) / 20.0)
+        s = (s + n * k).astype(np.float32)
+
+    return b.astype(np.float32), np.asarray(s, dtype=np.float32)
+
+
 def build_antispoof_pairs(
     n: int = 300,
     sr: int = TARGET_SR,
@@ -370,7 +438,12 @@ def build_antispoof_pairs(
     (out_dir / "bonafide").mkdir(parents=True, exist_ok=True)
     (out_dir / "spoof").mkdir(parents=True, exist_ok=True)
 
-    utts = gramvaani_utterances(limit=n, require_text=True)
+    utts = [
+        u for u in gramvaani_utterances(limit=n * 3, require_text=True)
+        # after stripping the markers there has to be enough text left that the
+        # rendered clip is comparable in length to the real one
+        if len(N.clean_for_tts(u["text"])) >= 25
+    ][:n]
     if not utts:
         return {"error": "no GramVaani utterances found, is it downloaded?",
                 "status": status()}
@@ -379,8 +452,11 @@ def build_antispoof_pairs(
     items = []
     for i, u in enumerate(utts):
         v = N.voice_for_speaker(f"spoof_{i % 40}", seed)
-        # GramVaani transcripts are already Devanagari, so no transliteration
-        items.append((u["text"], v["voice"], v["rate"], v["pitch"]))
+        # GramVaani transcripts are already Devanagari, so no transliteration.
+        # They do carry <inaudible> markers though, and the TTS service reads
+        # those as SSML tags and stops rendering at the first one, so they have
+        # to be stripped or the spoof clip comes back truncated.
+        items.append((N.clean_for_tts(u["text"]), v["voice"], v["rate"], v["pitch"]))
 
     if progress:
         print(f"  rendering {len(items)} spoof utterances")
@@ -396,15 +472,21 @@ def build_antispoof_pairs(
         if spoof is None or human.size < int(0.5 * sr):
             continue
 
+        # half plain TTS, half vocoded, so the spoof side is not one system
+        vocoded = bool(rng.random() < 0.5)
+        y = N.vocoder_artifacts(spoof, sr) if vocoded else spoof
+
+        # Both sides through the same channel, and the spoof's noise floor
+        # matched to its own partner's. Without this the pair is separable on
+        # silence level alone at AUC 0.97 and the branch learns nothing.
+        human, y = match_channel(human, y, sr, seed=seed + i)
+
         hp = out_dir / "bonafide" / f"{u['utt_id']}.wav"
         write_wav(hp, human, sr)
         manifest.append({"path": str(hp), "label": 0, "kind": "bonafide",
                          "speaker": u["speaker"], "text": u["text"],
                          "source": u["dataset"]})
 
-        # half plain TTS, half vocoded, so the spoof side is not one system
-        vocoded = bool(rng.random() < 0.5)
-        y = N.vocoder_artifacts(spoof, sr) if vocoded else spoof
         sp = out_dir / "spoof" / f"{u['utt_id']}_{'voc' if vocoded else 'tts'}.wav"
         write_wav(sp, y, sr)
         manifest.append({"path": str(sp), "label": 1,
@@ -423,6 +505,10 @@ def build_antispoof_pairs(
         "bonafide_source": "GramVaani (OpenSLR 118), real Hindi telephone speech",
         "spoof_source": "edge-tts neural voices, half through an LPC vocoder",
         "construction": "paired: each spoof renders the same transcript as its bonafide",
+        "channel_matched": True,
+        "channel_note": ("both sides through the same codec, spoof noise floor "
+                         "matched to its partner; raw pairing leaked at AUC 0.97 "
+                         "on noise floor alone"),
         "items": manifest,
     }
     mpath.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")

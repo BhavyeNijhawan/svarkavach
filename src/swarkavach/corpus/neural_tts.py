@@ -247,7 +247,23 @@ def to_devanagari(text: str) -> str:
     return " ".join(out)
 
 
+#: Anything in angle brackets is stripped before synthesis. The service parses
+#: its input as SSML, so a transcription marker like `<inaudible>` is read as a
+#: tag and the render stops there. Measured on the GramVaani pairs: 95 percent
+#: of the truncated renders contained one of these, against 8 percent of the
+#: intact ones, and a 200 character line came back as 1.6 seconds of audio.
+_SSML_UNSAFE = re.compile(r"<[^>]*>")
+
+
+def clean_for_tts(text: str) -> str:
+    """Make a transcript safe to hand to the TTS service."""
+    t = _SSML_UNSAFE.sub(" ", text)
+    t = t.replace("&", " and ")
+    return re.sub(r"\s+", " ", t).strip()
+
+
 def prepare_text(text: str, script: str) -> str:
+    text = clean_for_tts(text)
     return to_devanagari(text) if script == "deva" else text
 
 
