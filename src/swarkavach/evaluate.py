@@ -408,6 +408,7 @@ def _eval_antispoof(p, calls: Sequence[Call], codecs: Sequence[str], say) -> Opt
     eer_tbl: Dict[str, Dict[str, Dict[str, Optional[float]]]] = {}
     tdcf_tbl: Dict[str, Dict[str, Dict[str, Optional[float]]]] = {}
     det_store: List[Dict[str, Any]] = []
+    models_by_fs: Dict[str, Dict[str, Any]] = {}
 
     def load_all(cs, codec):
         X, y = [], []
@@ -424,6 +425,22 @@ def _eval_antispoof(p, calls: Sequence[Call], codecs: Sequence[str], say) -> Opt
         return X, np.asarray(y, dtype=int)
 
     audio_train, y_train = load_all(train_calls, "clean")
+
+    # The obvious loop nesting re-reads and re-degrades every WAV for every
+    # feature set and every model, which on this corpus is thousands of
+    # redundant decodes. Decoding once per condition fixes that. Only ONE
+    # condition is held at a time: 120 test calls of 60 seconds at 8 kHz is
+    # about 230 MB per codec, so keeping all of them resident would be a
+    # gigabyte of audio for no reason.
+    _held: Dict[str, Any] = {}
+
+    def test_audio(codec: str):
+        if _held.get("codec") != codec:
+            _held.clear()
+            X, y = load_all(with_audio, codec)
+            _held.update({"codec": codec, "X": X, "y": y})
+            say(f"  decoded {len(X)} test calls for {codec}")
+        return _held["X"], _held["y"]
     for fs in feature_sets:
         eer_tbl[fs] = {}
         tdcf_tbl[fs] = {}
@@ -453,22 +470,45 @@ def _eval_antispoof(p, calls: Sequence[Call], codecs: Sequence[str], say) -> Opt
         except Exception as exc:
             say(f"  {fs} gbm failed: {exc}")
 
-        for mname, (_, model) in fitted.items():
+        models_by_fs[fs] = {name: m for name, (_, m) in fitted.items()}
+        for mname in fitted:
             eer_tbl[fs][mname] = {}
             tdcf_tbl[fs][mname] = {}
-            for codec in codecs:
-                audio_te, y_te = load_all(with_audio, codec)
-                if len(set(y_te.tolist())) < 2:
+
+    # Codec outermost, so each condition is decoded once and every feature set
+    # and model is scored against it before it is thrown away.
+    from .antispoof.features import frame_features as _frame_features
+
+    for codec in codecs:
+        X_te, y_te = test_audio(codec)
+        if len(set(y_te.tolist())) < 2:
+            for fs, models in models_by_fs.items():
+                for mname in models:
                     eer_tbl[fs][mname][codec] = None
                     tdcf_tbl[fs][mname][codec] = None
-                    continue
+            continue
+        for fs, models in models_by_fs.items():
+            if not models:
+                continue
+            try:
+                need_frames = "gmm" in models
+                F_utt = (np.asarray([utterance_features(x, sr, fs) for x, sr in X_te])
+                         if "gbm" in models else None)
+                F_frames = ([_frame_features(x, sr, fs) for x, sr in X_te]
+                            if need_frames else None)
+            except Exception as exc:
+                say(f"  {fs}/{codec} extraction failed: {exc}")
+                for mname in models:
+                    eer_tbl[fs][mname][codec] = None
+                    tdcf_tbl[fs][mname][codec] = None
+                continue
+
+            for mname, model in models.items():
                 try:
                     if mname == "gmm":
-                        from .antispoof.features import frame_features
-                        s = np.array([float(model.llr(frame_features(x, sr, fs))) for x, sr in audio_te])
+                        s = np.array([float(model.llr(F)) for F in F_frames])
                     else:
-                        F = np.asarray([utterance_features(x, sr, fs) for x, sr in audio_te])
-                        s = np.asarray(model.score(F), dtype=float).ravel()
+                        s = np.asarray(model.score(F_utt), dtype=float).ravel()
                     e, _ = eer(s, y_te)
                     eer_tbl[fs][mname][codec] = round(float(e), 4)
                     tdcf_tbl[fs][mname][codec] = round(float(min_tdcf(s, y_te)), 4)
@@ -485,7 +525,10 @@ def _eval_antispoof(p, calls: Sequence[Call], codecs: Sequence[str], say) -> Opt
                     say(f"  {fs}/{mname}/{codec} failed: {exc}")
                     eer_tbl[fs][mname][codec] = None
                     tdcf_tbl[fs][mname][codec] = None
+            del F_utt, F_frames
+        say(f"  {codec} done")
 
+    _held.clear()
     return {
         "feature_sets": feature_sets, "models": models, "conditions": list(codecs),
         "default_condition": "clean", "eer": eer_tbl, "min_tdcf": tdcf_tbl,
