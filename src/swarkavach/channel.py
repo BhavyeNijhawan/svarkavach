@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import subprocess
 import tempfile
+from functools import lru_cache
 from pathlib import Path
 from typing import Dict, Optional, Tuple
 
@@ -74,12 +75,42 @@ CODECS: Dict[str, Dict] = {
 }
 
 
+@lru_cache(maxsize=8)
+def _ffmpeg_can_encode(kind: str) -> bool:
+    """Can this ffmpeg actually encode `kind`, as opposed to merely existing.
+
+    Asking whether the binary is on PATH is not the same question. Colab ships
+    an ffmpeg with the native GSM 06.10 encoder but no AMR-NB one, because the
+    AMR encoder lives in libopencore_amrnb and most distribution builds leave
+    it out over licensing. So `find_ffmpeg() is not None` reported AMR-NB as
+    real while every encode quietly fell back to the numpy stand-in, and the
+    results would have carried a condition labelled as the true codec when it
+    was not.
+
+    Rather than parse `ffmpeg -encoders` and guess which encoder name the
+    container will select, this runs a fifth of a second of noise through the
+    exact path `apply_codec` uses. Whatever that path can do is what gets
+    reported. Once per codec per process.
+    """
+    if find_ffmpeg() is None:
+        return False
+    probe = np.sin(2.0 * np.pi * 440.0 * np.arange(1600) / 8000.0) * 0.2
+    try:
+        return _ffmpeg_codec(probe, TARGET_SR, kind) is not None
+    except Exception:
+        return False
+
+
 def codec_available(codec: str) -> bool:
     """True when this codec can run its real implementation right now."""
     info = CODECS.get(str(codec).lower())
     if info is None:
         return False
-    return bool(info["real"]) and (not info["needs_ffmpeg"] or find_ffmpeg() is not None)
+    if not info["real"]:
+        return False
+    if not info["needs_ffmpeg"]:
+        return True
+    return _ffmpeg_can_encode(str(codec).lower())
 
 
 # --------------------------------------------------------------------------
@@ -505,9 +536,11 @@ def apply_codec(
             y, out_sr = _codec_approx(x, sr, name, seed), sr
             info["real_codec"] = False
             info["backend"] = "numpy-approx"
-            info["note"] = ("ffmpeg not found, used the documented numpy "
-                            "approximation (band limit, spectral smearing, "
-                            "mu-law quantisation)")
+            why = ("ffmpeg not found" if find_ffmpeg() is None
+                   else f"this ffmpeg build has no {name} encoder")
+            info["note"] = (f"{why}, used the documented numpy approximation "
+                            "(band limit, spectral smearing, mu-law "
+                            "quantisation)")
 
     y = np.nan_to_num(np.asarray(y, dtype=np.float64), nan=0.0, posinf=0.0, neginf=0.0)
     info["sr_out"] = int(out_sr)

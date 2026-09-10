@@ -305,8 +305,14 @@ is close enough to chance to leave alone.
 - 480 calls, balanced across the four cells of {human, cloned} x {benign, scam}
   and across scenarios, with speaker-disjoint train, dev and test splits.
 - All audio at 8 kHz. Channel conditions: clean, G.711 mu-law, G.711 A-law,
-  GSM, AMR-NB. Where ffmpeg is absent the GSM and AMR paths fall back to a
-  documented numpy approximation and are labelled as such in the results.
+  GSM, AMR-NB. GSM and AMR-NB shell out to ffmpeg, and where that is not
+  possible they fall back to a documented numpy approximation which is
+  labelled as such in the results. Not possible covers two cases, and they are
+  worth separating: no ffmpeg at all, and an ffmpeg without that particular
+  encoder. The second is the common one. Colab's build carries the native
+  GSM 06.10 encoder but no AMR-NB encoder, since AMR lives in
+  libopencore_amrnb and most distribution builds omit it, so an AMR-NB row
+  from a Colab run is the approximation and says so in its note.
 - Fixed seed throughout, recorded in the corpus manifest.
 - Metrics: equal error rate and a cost-weighted minimum detection cost for the
   voice branch, entity-level precision, recall and F1 with exact span matching

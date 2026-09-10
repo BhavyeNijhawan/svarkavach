@@ -128,7 +128,8 @@ trim_silence(x, sr, cfg) -> np.ndarray
 apply_codec(x, sr, codec, **kw) -> (np.ndarray, sr)
   # codec in {"clean","g711u","g711a","gsm","amrnb","narrowband","packet_loss"}
   # g711u / g711a are exact mu-law and A-law companding, implemented in numpy
-  # gsm / amrnb shell out to ffmpeg if config.find_ffmpeg() finds it, otherwise
+  # gsm / amrnb shell out to ffmpeg when that build can actually encode them
+  # (codec_available probes it rather than trusting find_ffmpeg), otherwise
   #   they fall back to a documented numpy approximation and set a flag
 add_noise(x, snr_db, kind="babble"|"white"|"hum") -> np.ndarray
 telephone_band(x, sr, low=300, high=3400) -> np.ndarray

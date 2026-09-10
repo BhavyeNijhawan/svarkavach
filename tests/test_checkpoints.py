@@ -193,6 +193,50 @@ def test_speakers_get_different_voices():
     assert len(voices) >= 4, voices
 
 
+def test_codec_availability_matches_what_ffmpeg_can_actually_do():
+    """A build that has ffmpeg but not this encoder must not claim the codec.
+
+    Colab ships an ffmpeg with the native GSM 06.10 encoder and no AMR-NB one,
+    because AMR lives in libopencore_amrnb and most distribution builds leave
+    it out. Checking only that the binary exists reported AMR-NB as the real
+    standard while every encode fell back to the numpy stand-in, so a results
+    table would have carried an approximation labelled as the true codec.
+
+    This machine has no ffmpeg at all, so the condition is simulated rather
+    than waited for.
+    """
+    import numpy as np
+
+    from swarkavach import channel
+
+    saved_codec = channel._ffmpeg_codec
+    saved_find = channel.find_ffmpeg
+
+    def only_gsm_works(x, sr, kind):
+        return (np.asarray(x, dtype=np.float64), 8000) if kind == "gsm" else None
+
+    try:
+        channel._ffmpeg_codec = only_gsm_works
+        channel.find_ffmpeg = lambda: "/usr/bin/ffmpeg"
+        channel._ffmpeg_can_encode.cache_clear()
+
+        x = np.sin(2 * np.pi * 300 * np.arange(8000) / 8000) * 0.3
+        for name in ("gsm", "amrnb"):
+            _, _, info = channel.apply_codec(x, 8000, name, return_info=True)
+            assert info["real_codec"] is channel.codec_available(name), name
+
+        assert channel.codec_available("gsm") is True
+        assert channel.codec_available("amrnb") is False
+
+        # and the reason has to be the true one, not "ffmpeg not found"
+        _, _, info = channel.apply_codec(x, 8000, "amrnb", return_info=True)
+        assert "no amrnb encoder" in info.get("note", ""), info.get("note")
+    finally:
+        channel._ffmpeg_codec = saved_codec
+        channel.find_ffmpeg = saved_find
+        channel._ffmpeg_can_encode.cache_clear()
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     failed = 0
