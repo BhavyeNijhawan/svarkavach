@@ -189,10 +189,35 @@ explain worse.
 
 Per-token language tags yield the Gamback and Das code-mixing index, the
 switch-point count, the entropy of the language-transition distribution, and
-the share of fraud-entity tokens carried by English. The last is the novel
-one. Indian fraud scripts keep threats and emotional pressure in Hindi while
-the financial and legal vocabulary stays English, so the alignment between
-entity type and carrier language is itself discriminative.
+the share of fraud-entity tokens carried by English. The last is the novel one.
+
+The measured result refines the hypothesis rather than confirming it as
+stated, so it is worth writing out in full. Across the corpus:
+
+| entity type | English share, scam | English share, benign |
+| --- | --- | --- |
+| PAYMENT_HANDLE | 0.96 | not present |
+| PERSONAL_INFO_REQ | 0.94 | not present |
+| OTP | 0.92 | 0.91 |
+| AUTHORITY_CLAIM | 0.89 | not present |
+| BANK_ENTITY | 0.89 | 0.89 |
+| MONEY_AMOUNT | 0.72 | 0.95 |
+| **THREAT_DEADLINE** | **0.23** | not present |
+
+Financial, technical and authority vocabulary is English in both classes, at
+89 to 96 percent. The threat is the exception: THREAT_DEADLINE spans are only
+23 percent English, because the construction that carries a threat in Hinglish
+is a Hindi verb phrase ("band ho jayega", "48 ghante ke andar"), and those
+spans occur only in scam calls.
+
+The consequence is that the aggregate runs the opposite way from the obvious
+guess: a scam call's fraud entities are LESS English on average (0.63) than a
+benign call's (0.90), because only the scam calls contain the Hindi-carried
+threats. The feature separates the classes strongly, the direction is simply
+inverted relative to the first statement of the hypothesis. What English marks
+is the financial noun; what Hindi marks is the coercion. Scam calls also show
+higher code mixing overall (CMI 0.224 against 0.184) and a higher switch rate
+(31.2 against 26.2 switch points per 100 language-bearing tokens).
 
 ### 4.5 Streaming and time to detection
 

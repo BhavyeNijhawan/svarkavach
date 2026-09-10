@@ -208,11 +208,12 @@ def write_reasons(
 
     cm = detail.get("code_mixing") or {}
     align = float(features.get("ent_lang_align", 0.0))
-    if align >= 0.6 and counts:
+    if counts and align <= 0.75 and counts.get("THREAT_DEADLINE", 0):
         out.append(_reason(
-            f"The threat is carried in Hindi while the financial vocabulary stays English "
-            f"({align:.0%} of fraud entities are English tokens), which is the code-switching "
-            "signature of a rehearsed Indian fraud script.",
+            f"The money words are English but the threat is in Hindi: only {align:.0%} of "
+            "the fraud entities here are English tokens, against about 90 percent on a "
+            "legitimate call. That split is the code-switching signature of a rehearsed "
+            "Indian fraud script.",
             group="cross"))
 
     resist = float(features.get("callee_resist", 0.0))

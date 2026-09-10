@@ -10,13 +10,18 @@ Why code-mixing measurements belong in a fraud detector at all:
 * Scam scripts are written, rehearsed and read out. Read speech mixes
   differently from spontaneous speech: fewer, larger monolingual blocks and a
   more regular switching rhythm. `switch_entropy` measures that rhythm.
-* Indian fraud scripts put the emotional and coercive material in Hindi
-  (dar, jaldi, band ho jayega) while the financial and technical vocabulary
-  stays in English (OTP, KYC, UPI, account). `ent_lang_align` measures exactly
-  that split: the share of entity tokens carried by English. A genuine bank
-  call talks about the same English nouns but wraps them in neutral Hindi, so
-  the alignment alone is weaker evidence than the entity types, yet it adds
-  signal on top of them.
+* Indian fraud scripts put the coercive material in Hindi (band ho jayega,
+  48 ghante ke andar) while the financial and technical vocabulary stays in
+  English (OTP, KYC, UPI, account). `ent_lang_align` measures that split as
+  the share of entity tokens carried by English.
+
+  Read the direction carefully, because the measured result is the reverse of
+  the obvious guess. On this corpus, bank, OTP, payment, authority and
+  personal-information entities run 89 to 96 percent English in scam and
+  benign calls alike. Only THREAT_DEADLINE breaks the pattern, at 23 percent
+  English, and threat deadlines appear only in scam calls. So a scam call's
+  fraud entities average LESS English (0.63) than a benign call's (0.90).
+  Lower alignment means more fraudulent, not higher.
 """
 
 from __future__ import annotations

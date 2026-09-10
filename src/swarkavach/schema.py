@@ -432,7 +432,13 @@ FUSION_FEATURES: Tuple[Tuple[str, str, str, int], ...] = (
     ("act_scam_llr",      "cross",  "Dialogue-act sequence LLR",        +1),
     ("cmi",               "cross",  "Code-mixing index",                +1),
     ("switch_entropy",    "cross",  "Code-switch entropy",              +1),
-    ("ent_lang_align",    "cross",  "Entity-language alignment",        +1),
+    # Measured on the corpus, this runs the opposite way from the obvious
+    # guess. Bank, OTP, authority, payment and personal-info entities are 89 to
+    # 96 percent English in BOTH classes. Threat deadlines are only 23 percent
+    # English ("band ho jayega") and appear only in scam calls, so a scam
+    # call's fraud entities come out LESS English overall (0.63) than a benign
+    # call's (0.90). English marks the financial noun, Hindi carries the threat.
+    ("ent_lang_align",    "cross",  "Entity-language alignment",        -1),
     ("callee_resist",     "cross",  "Callee resistance ratio",          +1),
 )
 

@@ -1,0 +1,157 @@
+{
+  "entities_per_type": {
+    "OTP": 183,
+    "BANK_ENTITY": 319,
+    "AUTHORITY_CLAIM": 154,
+    "THREAT_DEADLINE": 307,
+    "PAYMENT_HANDLE": 109,
+    "PERSONAL_INFO_REQ": 114,
+    "MONEY_AMOUNT": 152
+  },
+  "cmi_by_class": {
+    "scam": {
+      "cmi": 0.2242,
+      "switch_rate": 31.187,
+      "en_ratio": 0.2237,
+      "ent_lang_align": 0.6255,
+      "n_entity_tokens": 2331
+    },
+    "benign": {
+      "cmi": 0.184,
+      "switch_rate": 26.151,
+      "en_ratio": 0.1872,
+      "ent_lang_align": 0.902,
+      "n_entity_tokens": 255
+    }
+  },
+  "scam_scenarios": [
+    "kyc_freeze",
+    "otp_theft",
+    "digital_arrest",
+    "lottery_prize",
+    "fake_relative",
+    "electricity_disconnect",
+    "courier_customs",
+    "job_offer",
+    "loan_approval",
+    "sim_block"
+  ],
+  "benign_scenarios": [
+    "bank_reminder",
+    "delivery_otp",
+    "family_call",
+    "telemarketing",
+    "appointment_reminder",
+    "customer_support",
+    "survey_call",
+    "school_notice"
+  ],
+  "n_calls": 480,
+  "n_turns": 5025,
+  "n_tokens": 62257,
+  "n_entities": 1338,
+  "n_scam": 240,
+  "n_benign": 240,
+  "n_hard_negatives": 151,
+  "n_mild_scams": 53,
+  "entities": {
+    "OTP": 183,
+    "BANK_ENTITY": 319,
+    "AUTHORITY_CLAIM": 154,
+    "THREAT_DEADLINE": 307,
+    "PAYMENT_HANDLE": 109,
+    "PERSONAL_INFO_REQ": 114,
+    "MONEY_AMOUNT": 152
+  },
+  "acts": {
+    "AUTHORITY_ASSERT": 73,
+    "CLOSE": 480,
+    "CONFIRM": 694,
+    "DEADLINE": 155,
+    "GREET": 480,
+    "IDENTIFY_SELF": 467,
+    "INFORM": 494,
+    "INSTRUCT": 179,
+    "ISOLATE": 105,
+    "PRESSURE_ESCALATE": 191,
+    "PROBLEM_STATE": 187,
+    "REASSURE": 342,
+    "REQUEST_SENSITIVE": 271,
+    "SMALLTALK": 53,
+    "THREAT": 132,
+    "VICTIM_COMPLY": 194,
+    "VICTIM_QUESTION": 339,
+    "VICTIM_RESIST": 189
+  },
+  "scenarios": {
+    "appointment_reminder": 29,
+    "bank_reminder": 31,
+    "courier_customs": 23,
+    "customer_support": 29,
+    "delivery_otp": 31,
+    "digital_arrest": 25,
+    "electricity_disconnect": 23,
+    "fake_relative": 23,
+    "family_call": 31,
+    "job_offer": 23,
+    "kyc_freeze": 25,
+    "loan_approval": 24,
+    "lottery_prize": 25,
+    "otp_theft": 25,
+    "school_notice": 29,
+    "sim_block": 24,
+    "survey_call": 29,
+    "telemarketing": 31
+  },
+  "cells": {
+    "clonedxbenign": 120,
+    "clonedxscam": 120,
+    "humanxbenign": 120,
+    "humanxscam": 120
+  },
+  "cells_by_split": {
+    "dev": {
+      "clonedxbenign": 18,
+      "clonedxscam": 18,
+      "humanxbenign": 18,
+      "humanxscam": 18
+    },
+    "test": {
+      "clonedxbenign": 30,
+      "clonedxscam": 30,
+      "humanxbenign": 30,
+      "humanxscam": 30
+    },
+    "train": {
+      "clonedxbenign": 72,
+      "clonedxscam": 72,
+      "humanxbenign": 72,
+      "humanxscam": 72
+    }
+  },
+  "splits": {
+    "dev": 72,
+    "test": 120,
+    "train": 288
+  },
+  "speakers_per_split": {
+    "dev": 4,
+    "test": 6,
+    "train": 14
+  },
+  "lang_tokens": {
+    "en": 9243,
+    "hi": 34839,
+    "univ": 18175
+  },
+  "mean_cmi": 0.204,
+  "switch_points": 12897,
+  "mean_turns_per_call": 10.469,
+  "mean_tokens_per_turn": 12.389,
+  "mean_duration_s": 51.888,
+  "total_duration_s": 24906.02,
+  "mean_coercion": {
+    "scam": 0.3536,
+    "benign": 0.1505
+  }
+}

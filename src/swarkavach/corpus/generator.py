@@ -605,6 +605,16 @@ def corpus_stats(calls: Sequence[Call]) -> Dict[str, Any]:
     durations: List[float] = []
     n_hard_neg = n_mild = 0
 
+    # Code-mixing split by class. This is the evidence for the claim that
+    # fraud scripts keep the threat in Hindi and the money vocabulary in
+    # English, so it is worth reporting separately rather than as one pooled
+    # average that hides the whole effect.
+    cm = {
+        k: {"cmi": [], "switches": 0, "lang_tokens": Counter(),
+            "ent_tokens": Counter()}
+        for k in ("scam", "benign")
+    }
+
     for call in calls:
         scenarios[call.scenario] += 1
         cells[call.cell] += 1
@@ -615,6 +625,7 @@ def corpus_stats(calls: Sequence[Call]) -> Dict[str, Any]:
         n_hard_neg += int(bool(call.meta.get("hard_negative")))
         n_mild += int(bool(call.meta.get("mild_scam")))
 
+        key = "scam" if call.label_scam else "benign"
         call_langs: List[str] = []
         ranks: List[float] = []
         for turn in call.turns:
@@ -624,18 +635,46 @@ def corpus_stats(calls: Sequence[Call]) -> Dict[str, Any]:
             call_langs.extend(turn.lang)
             for tag in turn.lang:
                 langs[tag] += 1
+                cm[key]["lang_tokens"][tag] += 1
             ranks.append(COERCION_RANK.get(turn.act, 0.0))
             for span in turn.entities():
                 entities[span.type] += 1
-        cmis.append(code_mixing_index(call_langs))
-        switches += switch_points(call_langs)
-        key = "scam" if call.label_scam else "benign"
+                # which language carries this entity, token by token
+                for i in range(span.tok_start, min(span.tok_end, len(turn.lang))):
+                    cm[key]["ent_tokens"][turn.lang[i]] += 1
+
+        call_cmi = code_mixing_index(call_langs)
+        call_switch = switch_points(call_langs)
+        cmis.append(call_cmi)
+        switches += call_switch
+        cm[key]["cmi"].append(call_cmi)
+        cm[key]["switches"] += call_switch
         coercion[key].append(sum(ranks) / len(ranks) if ranks else 0.0)
 
     def mean(xs: Sequence[float]) -> float:
         return float(sum(xs) / len(xs)) if len(xs) else 0.0
 
+    cmi_by_class: Dict[str, Dict[str, float]] = {}
+    for key, d in cm.items():
+        lang_total = d["lang_tokens"]["hi"] + d["lang_tokens"]["en"]
+        ent_total = d["ent_tokens"]["hi"] + d["ent_tokens"]["en"]
+        cmi_by_class[key] = {
+            "cmi": round(mean(d["cmi"]), 4),
+            # per 100 language-bearing tokens, so call length does not matter
+            "switch_rate": round(100.0 * d["switches"] / lang_total, 3) if lang_total else 0.0,
+            "en_ratio": round(d["lang_tokens"]["en"] / lang_total, 4) if lang_total else 0.0,
+            # the novel one: how much of the fraud vocabulary is English
+            "ent_lang_align": round(d["ent_tokens"]["en"] / ent_total, 4) if ent_total else 0.0,
+            "n_entity_tokens": int(ent_total),
+        }
+
     return {
+        # The dashboard reads entities_per_type and cmi_by_class; `entities`
+        # is kept as it was so nothing that already reads it breaks.
+        "entities_per_type": {t: int(entities.get(t, 0)) for t in ENTITY_TYPES},
+        "cmi_by_class": cmi_by_class,
+        "scam_scenarios": list(SCAM_SCENARIOS),
+        "benign_scenarios": list(BENIGN_SCENARIOS),
         "n_calls": len(calls),
         "n_turns": n_turns,
         "n_tokens": n_tokens,

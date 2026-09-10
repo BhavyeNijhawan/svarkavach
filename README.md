@@ -65,12 +65,18 @@ tagged with a dialogue act, each act carries a pressure rank, and the fitted
 slope across the call plus the act-sequence likelihood ratio under scam and
 benign Markov models become features. Bag-of-words cannot see order.
 
-**Code-switching as a fraud signal.** Indian fraud scripts keep the emotional
-and threatening content in Hindi and leave the financial and technical
-vocabulary in English. Per-token language identification yields a code-mixing
-index, switch-point entropy, and the share of fraud entities carried by
-English. That last quantity discriminates, and nobody has used it for fraud
-detection.
+**Code-switching as a fraud signal.** Indian fraud scripts keep the money and
+authority vocabulary in English while the threat itself is a Hindi verb
+phrase. Per-token language identification yields a code-mixing index,
+switch-point entropy, and the share of fraud entities carried by English.
+
+Measured on the corpus, that last one discriminates hard but in the opposite
+direction to the obvious guess: bank, OTP, payment, authority and
+personal-information entities are 89 to 96 percent English in both classes,
+while threat deadlines are only 23 percent English ("band ho jayega") and
+appear only in scam calls. A scam call's fraud entities therefore come out
+less English overall, 0.63 against 0.90. English marks the financial noun,
+Hindi carries the coercion. Full table in `docs/REPORT.md` section 4.4.
 
 **Time to detection.** Accuracy on a finished recording is the wrong question
 for a system meant to interrupt a live call. The pipeline re-scores after every
