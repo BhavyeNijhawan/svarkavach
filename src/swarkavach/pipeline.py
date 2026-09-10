@@ -415,12 +415,30 @@ class Pipeline:
             report["pim_anchors"] = f"failed: {type(exc).__name__}: {exc}"
             say(f"  anchor calibration failed: {exc}")
 
-        # 5. anti-spoofing
+        # 5. anti-spoofing.
+        #
+        # Trained on the REAL paired set when it is on disk: GramVaani human
+        # telephone speech against a neural rendering of the same transcript.
+        # The generated corpus cannot answer "is this a person or a machine",
+        # because both sides of its human against cloned axis are machines. The
+        # real pairs can, so they take priority and the corpus is the fallback.
         try:
             from .antispoof.scorer import AntiSpoofScorer
-            say("training anti-spoofing branch")
+            from .datasets import antispoof_pairs_as_calls
+
+            pair_calls = antispoof_pairs_as_calls()
+            if pair_calls:
+                say(f"training anti-spoofing branch on {len(pair_calls)} real "
+                    f"paired utterances (GramVaani against neural TTS)")
+                as_train = pair_calls
+            else:
+                say("training anti-spoofing branch on the generated corpus "
+                    "(no real pairs on disk, run: swarkavach fetch-data)")
+                as_train = train_and_dev
+            report["antispoof_trained_on"] = (
+                "real_pairs" if pair_calls else "generated_corpus")
             sc = self.models.antispoof or AntiSpoofScorer()
-            sc.fit(train_and_dev)
+            sc.fit(as_train)
             sc.save(str(artifact_path("antispoof.joblib")))
             self.models.antispoof = sc
             report["antispoof"] = getattr(sc, "backend", "trained")

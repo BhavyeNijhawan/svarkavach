@@ -89,6 +89,50 @@ language tags, emitted by construction instead of annotated by hand, and
 renders paired human-sounding and synthetic-sounding audio. The whole project
 therefore reproduces on a laptop with no dataset downloads.
 
+## Where the audio comes from
+
+Three sources, each doing a job the others cannot. Keeping them separate is
+deliberate: blending them into one headline number would hide which claim
+rests on real speech and which rests on generated speech.
+
+| source | what it is | what it is used for | licence |
+| --- | --- | --- | --- |
+| **GramVaani**, OpenSLR 118 | 2,884 transcribed real Hindi **telephone** utterances, 7.6 hours, 2,726 speakers, 1,728 natively 8 kHz, with gender and accent labels | the bonafide side of the voice branch | free for academic use |
+| **NCSU WSPR robocalls** | 1,432 genuine illegal robocalls with transcripts | out-of-domain test for the intent branch, real fraud scripts nothing was tuned on | public domain (FTC evidence) |
+| **CallForge**, in this repo | generated Hinglish dialogues with gold BIO, acts and language tags, rendered with neural voices | the fusion grid and the live monitor, where audio and transcript have to match | MIT, with the code |
+
+Both downloads are direct HTTP with no account and no approval form, which was
+a hard constraint on this project. Fetch them with:
+
+```bash
+python -m swarkavach.datasets          # shows what is on disk
+swarkavach fetch-data                  # downloads GramVaani and the robocalls
+```
+
+### The Hindi anti-spoofing set
+
+No public Hindi anti-spoofing dataset exists. The survey behind this project
+checked, and the nearest thing (IITG-HingCoS: 25 hours of Hinglish at 8 kHz
+over the telephone) is not distributed at all. So the set is constructed here,
+using the ASVspoof recipe: for each real GramVaani utterance, the spoof side
+renders **the same transcript** with a neural voice, half of those additionally
+through an LPC vocoder. Matched content is the point. If the two classes talked
+about different things, a detector could separate them on topic and never learn
+anything about voice.
+
+### What the generated audio is, and is not
+
+The corpus renderer uses real neural voices, so the audio says the words on the
+screen. It is still machine generated on both sides of the human against cloned
+axis, because nobody has recorded these scam scripts. The cloned cells are put
+through a vocoder re-synthesis that imposes the low jitter, low shimmer and
+raised harmonic-to-noise ratio that real cloning leaves behind.
+
+So the local four-cell grid measures whether the method separates the cells,
+not whether a machine can be told from a person. That second question is
+answered on GramVaani against real TTS, and on ASVspoof and In-the-Wild in the
+Colab notebooks. `docs/REPORT.md` section 4.2.1 spells this out.
+
 ## Quick start
 
 Requires Python 3.10 or newer. No GPU, no ffmpeg, no dataset download.

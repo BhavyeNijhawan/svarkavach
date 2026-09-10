@@ -63,6 +63,88 @@ def gen_corpus(
     console.print(f"[green]done in {time.time() - t0:.1f}s[/] -> {config.CORPUS_DIR}")
 
 
+@app.command("fetch-data")
+def fetch_data(
+    which: str = typer.Option("core", help="core | all | a comma separated list"),
+    pairs: int = typer.Option(500, help="paired anti-spoof utterances to build, 0 to skip"),
+):
+    """Download the real corpora and build the Hindi anti-spoofing pairs.
+
+    Both sources are direct HTTP with no account and no approval form, which
+    was a hard constraint on this project. "core" is GramVaani dev and eval
+    plus the robocall set, about 800 MB. "all" adds the 2 GB GramVaani
+    training archive.
+    """
+    import shutil
+    import subprocess
+    import urllib.request
+
+    from . import datasets as D
+
+    config.ensure_dirs()
+    names = {
+        "core": ["gramvaani_dev", "gramvaani_eval", "robocall"],
+        "all": list(D.DATASETS),
+    }.get(which, [w.strip() for w in which.split(",") if w.strip()])
+
+    _rule("Fetching data")
+    for name in names:
+        spec = D.DATASETS.get(name)
+        if spec is None:
+            console.print(f"[yellow]unknown dataset {name}[/]")
+            continue
+
+        if "archive" in spec:
+            dest = config.RAW_DIR / spec["archive"]
+            if dest.exists():
+                console.print(f"  [dim]{name}: already present[/]")
+                continue
+            console.print(f"  {name}: {spec['size_mb']} MB from {spec['url']}")
+            tmp = dest.with_suffix(dest.suffix + ".part")
+            try:
+                urllib.request.urlretrieve(spec["url"], tmp)
+                tmp.rename(dest)
+                console.print(f"    [green]done[/] {dest.stat().st_size / 1e6:.0f} MB")
+            except Exception as exc:
+                console.print(f"    [red]failed: {exc}[/]")
+        else:
+            dest = config.RAW_DIR / spec["dir"]
+            if dest.exists():
+                console.print(f"  [dim]{name}: already cloned[/]")
+                continue
+            if shutil.which("git") is None:
+                console.print("  [red]git not found, cannot clone the robocall set[/]")
+                continue
+            console.print(f"  {name}: cloning {spec['git']}")
+            r = subprocess.run(["git", "clone", "--depth", "1", spec["git"], str(dest)],
+                               capture_output=True, text=True)
+            console.print("    [green]done[/]" if r.returncode == 0
+                          else f"    [red]failed: {r.stderr[-200:]}[/]")
+
+    # the metadata archive is tiny and carries the gender and accent labels
+    meta = config.RAW_DIR / "Metadata.tar.gz"
+    if not meta.exists():
+        try:
+            urllib.request.urlretrieve(f"{D.OPENSLR_118}/Metadata.tar.gz", meta)
+            console.print("  [green]metadata (speaker gender and accent labels)[/]")
+        except Exception:
+            pass
+
+    t = Table(show_header=False, box=None)
+    for k, v in D.status().items():
+        t.add_row(k, str(v))
+    console.print(t)
+
+    if pairs > 0:
+        _rule(f"Building {pairs} anti-spoofing pairs")
+        out = D.build_antispoof_pairs(n=pairs)
+        if out.get("error"):
+            console.print(f"[red]{out['error']}[/]")
+        else:
+            console.print(f"[green]{out['n_pairs']} pairs, {out['n_files']} files[/] "
+                          f"-> {out.get('manifest')}")
+
+
 @app.command("train")
 def train(
     verbose: bool = typer.Option(True, help="print progress"),
