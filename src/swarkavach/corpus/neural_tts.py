@@ -63,7 +63,23 @@ VOICE_POOL: Tuple[Tuple[str, str, str], ...] = (
     ("en-IN-NeerjaExpressiveNeural", "female", "latin"),
 )
 
-MAX_CONCURRENCY = 8
+#: How many synthesis requests to have in flight at once.
+#:
+#: This is deliberately low. The service is not a documented API with a
+#: published rate limit, it is the voice endpoint a browser uses, and it
+#: rejects bursts. Measured: at 8 concurrent, 324 of 324 fresh requests failed
+#: while sequential probes went through in 1.2 seconds each, so the whole batch
+#: silently produced nothing and the pipeline carried on with empty audio. Low
+#: concurrency plus patient retries is slower and actually finishes.
+MAX_CONCURRENCY = 3
+
+#: Gap between the start of one request and the next within a worker. Enough
+#: to look like a person using a browser rather than a scraper.
+REQUEST_SPACING_S = 0.25
+
+#: Retry schedule in seconds. Long enough to ride out a short throttle.
+RETRY_BACKOFF = (1.0, 3.0, 8.0, 20.0)
+
 CACHE_DIR = CORPUS_DIR / "tts_cache"
 
 
@@ -437,18 +453,21 @@ async def _synth_one(
     tmp = path.with_suffix(".mp3.part")
     last_error: Optional[BaseException] = None
     async with sem:
-        for attempt in range(3):
+        for attempt in range(len(RETRY_BACKOFF) + 1):
             try:
                 comm = edge_tts.Communicate(text, voice, rate=rate, pitch=pitch)
                 await comm.save(str(tmp))
-                last_error = None
-                break
+                if tmp.exists() and tmp.stat().st_size > 512:
+                    last_error = None
+                    break
+                raise RuntimeError(f"empty response ({tmp.stat().st_size if tmp.exists() else 0} bytes)")
             except Exception as exc:
                 last_error = exc
-                if attempt == 2:
+                if attempt >= len(RETRY_BACKOFF):
                     _record_failure(text, voice, exc)
                     return None
-                await asyncio.sleep(1.5 * (attempt + 1))
+                await asyncio.sleep(RETRY_BACKOFF[attempt])
+        await asyncio.sleep(REQUEST_SPACING_S)
     if last_error is not None:
         return None
 

@@ -210,6 +210,18 @@ def _render_edge(call: Call, sr: int, seed: int = 0) -> Tuple[List[np.ndarray], 
     rendered = N.synth_batch(items, sr=sr)
     n_failed = sum(1 for r in rendered if r is None)
 
+    # Fail loudly rather than writing a call made mostly of silence. When the
+    # synthesis service started rejecting concurrent requests, every fresh
+    # render returned None, each became a 0.5 second gap, and the pipeline
+    # carried on and trained on near-empty audio without complaining once.
+    if items and n_failed > 0.4 * len(items):
+        raise RuntimeError(
+            f"{n_failed} of {len(items)} turns failed to synthesise. "
+            f"The service is probably rejecting concurrent requests: try "
+            f"lowering neural_tts.MAX_CONCURRENCY (currently "
+            f"{N.MAX_CONCURRENCY}). Last errors: {N.FAILURES[:2]}"
+        )
+
     segments: List[np.ndarray] = []
     per_turn: List[Dict[str, Any]] = []
     for turn, seg in zip(call.turns, rendered):
