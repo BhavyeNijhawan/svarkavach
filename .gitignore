@@ -8,7 +8,6 @@ __pycache__/
 
 # heavy data: never commit
 data/raw/
-data/corpus/audio/
 data/models/*.pt
 data/models/*.joblib
 data/models/*.npz
@@ -26,3 +25,10 @@ data/models/*.npz
 Thumbs.db
 .DS_Store
 desktop.ini
+
+# Generated corpus. Deterministic from the seed recorded in manifest.json, so
+# regenerating is one command and committing 480 churning JSON files buys
+# nothing. manifest.json itself IS tracked: it is the reproducibility record.
+data/corpus/calls/
+data/corpus/audio/
+data/uploads/
