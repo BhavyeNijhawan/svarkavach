@@ -22,14 +22,17 @@ function archSvg() {
   };
   const box = (x, y, w, h, fill, stroke) =>
     `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="9" fill="${fill}" stroke="${stroke}" stroke-width="1.4"/>`;
-  const label = (x, y, s, size = 11.5, weight = 600, fill = c.text, anchor = "middle") =>
+  // Font sizes are deliberately large for the viewBox. The card is often
+  // narrower than 880px, so the whole drawing gets scaled down; at 0.45 scale
+  // a 10px label lands at 4px on screen, which nobody can read.
+  const label = (x, y, s, size = 15, weight = 600, fill = c.text, anchor = "middle") =>
     `<text x="${x}" y="${y}" text-anchor="${anchor}" font-size="${size}" font-weight="${weight}" fill="${fill}" font-family="var(--sans)">${s}</text>`;
   const arrow = (x1, y1, x2, y2) =>
-    `<path d="M${x1},${y1} L${x2},${y2}" stroke="${c.line}" stroke-width="1.6" marker-end="url(#ah)"/>`;
+    `<path d="M${x1},${y1} L${x2},${y2}" stroke="${c.line}" stroke-width="1.8" marker-end="url(#ah)"/>`;
   const soft = (col) => `color-mix(in srgb, ${col} 12%, transparent)`;
 
   return `
-<svg viewBox="0 0 880 430" width="100%" style="max-width:880px;display:block;margin:0 auto" role="img"
+<svg viewBox="0 0 880 430" width="100%" style="max-width:1100px;display:block;margin:0 auto" role="img"
      aria-label="Architecture: call audio splits into a voice branch and a text branch, which meet at a cross-modal fusion layer">
   <defs>
     <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
@@ -37,61 +40,59 @@ function archSvg() {
     </marker>
   </defs>
 
-  ${box(20, 24, 168, 52, c.surf, c.line)}
-  ${label(104, 45, "Call audio", 12.5)}
-  ${label(104, 62, "8 kHz mono, VAD trimmed", 10, 400, c.dim)}
+  ${box(18, 22, 190, 58, c.surf, c.line)}
+  ${label(113, 47, "Call audio", 17)}
+  ${label(113, 68, "8 kHz mono, VAD trimmed", 13, 400, c.dim)}
 
-  ${arrow(188, 50, 236, 50)}
-  ${box(236, 18, 150, 64, c.surf, c.line)}
-  ${label(311, 40, "Channel model", 12)}
-  ${label(311, 56, "G.711 / GSM / AMR", 9.8, 400, c.dim)}
-  ${label(311, 70, "noise at a set SNR", 9.8, 400, c.dim)}
+  ${arrow(210, 51, 256, 51)}
+  ${box(256, 18, 190, 66, c.surf, c.line)}
+  ${label(351, 44, "Channel model", 17)}
+  ${label(351, 63, "G.711, GSM, AMR", 13, 400, c.dim)}
+  ${label(351, 78, "noise at a set SNR", 13, 400, c.dim)}
 
-  ${arrow(311, 82, 190, 126)}
-  ${arrow(311, 82, 560, 126)}
+  ${arrow(351, 84, 200, 132)}
+  ${arrow(351, 84, 590, 132)}
 
   <!-- voice branch -->
-  ${box(36, 126, 300, 128, soft(c.v), c.v)}
-  ${label(186, 148, "Voice authenticity branch", 12, 650, c.v)}
-  ${label(186, 170, "LFCC / GFCC / MFCC / CQCC / LPCC", 10.2, 400, c.dim)}
-  ${label(186, 187, "hand-written filterbanks and DCT", 9.6, 400, c.dim)}
-  ${label(186, 209, "GMM log-likelihood ratio, gradient boosting,", 10.2, 400, c.dim)}
-  ${label(186, 224, "SincConv RawNet-lite, speaker embedding", 10.2, 400, c.dim)}
-  ${label(186, 244, "output: P(voice is synthetic)", 10, 600, c.text)}
+  ${box(30, 132, 340, 132, soft(c.v), c.v)}
+  ${label(200, 158, "Voice authenticity", 17, 650, c.v)}
+  ${label(200, 182, "LFCC, GFCC, MFCC, CQCC, LPCC", 13.5, 400, c.dim)}
+  ${label(200, 201, "filterbanks and DCT written by hand", 13.5, 400, c.dim)}
+  ${label(200, 220, "GMM ratio, boosting, RawNet-lite", 13.5, 400, c.dim)}
+  ${label(200, 250, "P(voice is synthetic)", 14.5, 700, c.text)}
 
   <!-- text branch -->
-  ${box(412, 126, 300, 128, soft(c.t), c.t)}
-  ${label(562, 148, "Scam intent branch", 12, 650, c.t)}
-  ${label(562, 170, "ASR or gold transcript, per-token language ID", 10.2, 400, c.dim)}
-  ${label(562, 187, "scam-entity NER: CRF written from scratch,", 9.6, 400, c.dim)}
-  ${label(562, 201, "plus a BiLSTM-CRF tagger", 9.6, 400, c.dim)}
-  ${label(562, 222, "TF-IDF intent model and a rule baseline", 10.2, 400, c.dim)}
-  ${label(562, 244, "output: P(conversation is a scam)", 10, 600, c.text)}
+  ${box(420, 132, 340, 132, soft(c.t), c.t)}
+  ${label(590, 158, "Scam intent", 17, 650, c.t)}
+  ${label(590, 182, "transcript, per-token language ID", 13.5, 400, c.dim)}
+  ${label(590, 201, "entity CRF written from scratch,", 13.5, 400, c.dim)}
+  ${label(590, 220, "BiLSTM-CRF, TF-IDF, rule baseline", 13.5, 400, c.dim)}
+  ${label(590, 250, "P(conversation is a scam)", 14.5, 700, c.text)}
 
-  ${arrow(186, 254, 330, 292)}
-  ${arrow(562, 254, 420, 292)}
+  ${arrow(200, 264, 340, 300)}
+  ${arrow(590, 264, 450, 300)}
 
   <!-- cross modal -->
-  ${box(196, 292, 356, 74, soft(c.x), c.x)}
-  ${label(374, 314, "Cross-modal layer", 12, 650, c.x)}
-  ${label(374, 333, "prosody-intent mismatch, coercion trajectory,", 10, 400, c.dim)}
-  ${label(374, 348, "code-switching profile, dialogue-act sequence LLR", 10, 400, c.dim)}
-  ${label(374, 362, "these need BOTH branches, so neither can produce them alone", 9, 400, c.dim)}
+  ${box(150, 300, 490, 86, soft(c.x), c.x)}
+  ${label(395, 326, "Cross-modal layer", 17, 650, c.x)}
+  ${label(395, 348, "prosody-intent mismatch, coercion trajectory,", 13.5, 400, c.dim)}
+  ${label(395, 366, "code-switching profile, dialogue-act sequence LLR", 13.5, 400, c.dim)}
+  ${label(395, 381, "needs both branches, so neither can produce these alone", 12, 400, c.dim)}
 
-  ${arrow(374, 366, 374, 388)}
-  ${box(196, 388, 356, 34, soft(c.out), c.out)}
-  ${label(374, 409, "Calibrated fusion score, risk band and evidence panel", 11.5, 650, c.text)}
+  ${arrow(395, 386, 395, 400)}
+  ${box(150, 400, 490, 30, soft(c.out), c.out)}
+  ${label(395, 420, "Calibrated risk score, band and evidence panel", 15, 700, c.text)}
 
   <!-- side note -->
-  ${box(736, 126, 124, 128, c.surf, c.line)}
-  ${label(798, 148, "Streaming", 11.5)}
-  ${label(798, 168, "the same stack", 9.6, 400, c.dim)}
-  ${label(798, 182, "runs after every", 9.6, 400, c.dim)}
-  ${label(798, 196, "turn, which is", 9.6, 400, c.dim)}
-  ${label(798, 210, "where time to", 9.6, 400, c.dim)}
-  ${label(798, 224, "detection comes", 9.6, 400, c.dim)}
-  ${label(798, 238, "from", 9.6, 400, c.dim)}
-  <path d="M712,190 L736,190" stroke="${c.line}" stroke-width="1.6" stroke-dasharray="3 3"/>
+  ${box(790, 132, 82, 132, c.surf, c.line)}
+  ${label(831, 158, "Streaming", 14)}
+  ${label(831, 182, "reruns", 12, 400, c.dim)}
+  ${label(831, 198, "after every", 12, 400, c.dim)}
+  ${label(831, 214, "turn: this", 12, 400, c.dim)}
+  ${label(831, 230, "is where", 12, 400, c.dim)}
+  ${label(831, 246, "TTD comes", 12, 400, c.dim)}
+  ${label(831, 262, "from", 12, 400, c.dim)}
+  <path d="M760,198 L790,198" stroke="${c.line}" stroke-width="1.6" stroke-dasharray="3 3"/>
 </svg>`;
 }
 
@@ -141,9 +142,14 @@ const SYLLABUS = [
   ["M7", "ASR, speaker recognition, DNN, metrics", "Whisper transcription with word error rate against gold scripts, RawNet-lite, EER and minimum t-DCF"],
 ];
 
+function drawArch() {
+  const host = $("sys-arch");
+  if (host) host.innerHTML = archSvg();
+}
+
 export default {
   async init(state) {
-    $("sys-arch").innerHTML = archSvg();
+    drawArch();
 
     $("sys-novelty").innerHTML = NOVELTY.map(([h, b]) =>
       `<h3>${h}</h3><p>${b}</p>`).join("");
@@ -184,4 +190,8 @@ export default {
       { key: "where", label: "Where it is used" },
     ], SYLLABUS.map(([m, topic, where]) => ({ m, topic, where })));
   },
+
+  // The diagram is an SVG string with the theme colours already resolved into
+  // it, so it has to be rebuilt when the theme flips.
+  refresh() { drawArch(); },
 };

@@ -75,7 +75,16 @@ function showViewError(name, err) {
 function applyTheme(t) {
   document.documentElement.setAttribute("data-theme", t);
   try { localStorage.setItem("sk-theme", t); } catch { /* private mode */ }
-  requestAnimationFrame(redrawAll);
+  requestAnimationFrame(() => {
+    redrawAll();
+    // Charts registered with responsive() pick up the new tokens by
+    // themselves. Anything drawn once into a canvas or built as an SVG string
+    // does not, because it resolved the colour values when it ran, so the
+    // active view gets a chance to redraw those too.
+    if (current && VIEWS[current]) {
+      try { VIEWS[current].mod.refresh?.(STATE); } catch (e) { console.warn(e); }
+    }
+  });
 }
 
 function initTheme() {
