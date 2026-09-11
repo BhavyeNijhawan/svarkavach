@@ -300,6 +300,28 @@ its input as SSML, so it read them as tags and truncated 39 of 212 renders (a
 explicitly as a possible leak before the noise floor was, scoring 0.609, which
 is close enough to chance to leave alone.
 
+
+**The second confound: colour, not level.** Matching the noise FLOOR still
+leaves the two sides with different noise SPECTRA. The injected noise was
+white; real GramVaani audio is a phone recording whose noise is low-pass, with
+a measured high-to-low band tilt of -16.7 dB against white noise's -0.0 dB.
+Every front end in this project is cepstral, so spectral shape is precisely
+what they read. Measured on 40 real utterances, the tilt of the quiet frames
+separated real from white-noise-matched spoof at **AUC 1.000**, and the
+spectral centroid did the same. That is a free answer sitting underneath the
+task, and it is consistent with what the anti-spoofing table reported: an
+equal error rate of exactly 0.0 in nine of ten feature-set by model cells.
+
+The fix is to shape the injected noise like the partner recording's own noise,
+estimated from the magnitude spectrum of its quietest frames. The same two
+statistics then separate at 0.569 and 0.574, which is chance. The audit was
+extended to measure both of them, because the four statistics it had were all
+level statistics and none of them could see this.
+
+The general lesson is worth stating, since it cost two rounds: an audit only
+protects against the shortcuts it thinks to measure. Matching one property of
+a channel does not match the channel.
+
 ## 5. Experimental setup
 
 - 480 calls, balanced across the four cells of {human, cloned} x {benign, scam}

@@ -60,6 +60,36 @@ def gen_corpus(
     for split, k in (stats.get("splits") or {}).items():
         t.add_row(f"split {split}", str(k))
     console.print(t)
+
+    # Did the audio actually come from the backend that was asked for?
+    #
+    # render_call_audio falls back to the `sim` backend per call when the
+    # requested one throws, and `sim` is speech-shaped noise with no words in
+    # it. If the synthesis endpoint is unreachable from this network, every
+    # call falls back, gen-corpus exits 0, and you get a corpus that is
+    # useless for a demo after an hour of retry backoff. Only the per-call
+    # meta recorded the truth and nothing read it.
+    if audio and backend != "sim":
+        used = {}
+        for c in calls:
+            b = (c.meta.get("audio_info") or {}).get("backend") or c.audio_source or "?"
+            used[b] = used.get(b, 0) + 1
+        got = used.get(backend, 0)
+        share = got / max(len(calls), 1)
+        console.print(f"audio backend: " + ", ".join(f"{k}={v}" for k, v in sorted(used.items())))
+        if share < 0.9:
+            reasons = {}
+            for c in calls:
+                r = (c.meta.get("audio_info") or {}).get("fallback_reason")
+                if r:
+                    reasons[r] = reasons.get(r, 0) + 1
+            console.print(f"[red]only {got}/{len(calls)} calls ({share:.0%}) rendered "
+                          f"with {backend!r}, the rest fell back to speech-shaped "
+                          f"noise with no words in it[/]")
+            for r, k in sorted(reasons.items(), key=lambda kv: -kv[1])[:3]:
+                console.print(f"  [red]{k}x {r}[/]")
+            raise typer.Exit(1)
+
     console.print(f"[green]done in {time.time() - t0:.1f}s[/] -> {config.CORPUS_DIR}")
 
 
@@ -189,6 +219,11 @@ def fetch_data(
         out = D.build_antispoof_pairs(n=pairs)
         if out.get("error"):
             console.print(f"[red]{out['error']}[/]")
+            raise typer.Exit(1)
+        elif int(out.get("n_pairs") or 0) < max(20, pairs // 4):
+            console.print(f"[red]only {out.get('n_pairs')} of {pairs} pairs were "
+                          f"built, the anti-spoofing branch cannot use this[/]")
+            raise typer.Exit(1)
         else:
             console.print(f"[green]{out['n_pairs']} pairs, {out['n_files']} files[/] "
                           f"-> {out.get('manifest')}")
@@ -209,6 +244,21 @@ def train(
     t0 = time.time()
     report = p.fit(verbose=verbose)
     console.print_json(json.dumps(report, default=str))
+
+    # Pipeline.fit catches per-stage exceptions so one dead branch does not
+    # cost the whole run, records "failed: ..." and returns normally. That is
+    # the right behaviour for the library and the wrong exit code for a
+    # caller: a run where only the fusion stage worked exited 0 and looked
+    # identical to a clean one, and the notebook then checkpointed a half
+    # empty models directory to Drive and skipped training ever after.
+    failures = [k for k, v in report.items()
+                if isinstance(v, str) and v.startswith("failed:")]
+    if failures:
+        console.print(f"[red]{len(failures)} stage(s) failed: {', '.join(failures)}[/]")
+        for k in failures:
+            console.print(f"  [red]{k}: {report[k]}[/]")
+        raise typer.Exit(1)
+
     console.print(f"[green]trained in {time.time() - t0:.1f}s[/] -> {config.MODELS_DIR}")
 
 

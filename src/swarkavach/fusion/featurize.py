@@ -244,9 +244,19 @@ def build_features(
         # from carrying a benign call.
         F["intent_max_turn"] = float(arr.max())
         F["intent_score"] = float(np.clip(0.6 * arr.max() + 0.4 * arr.mean(), 0.0, 1.0))
+    # Tag entities BEFORE scoring the call, because the call-level intent
+    # pooler needs the PREDICTED spans. It used to derive them itself from
+    # `Turn.bio`, which is the gold annotation, and its output overwrites
+    # F["intent_score"] below, so the highest weighted fusion feature was a
+    # function of the answer key on held-out calls.
+    spans = tag_entities(models, call, use_gold=use_gold_entities, notes=detail)
+
     if models.intent is not None and hasattr(models.intent, "score_call"):
         try:
-            cs = models.intent.score_call(call)
+            try:
+                cs = models.intent.score_call(call, spans=spans)
+            except TypeError:      # a model pickled before spans existed
+                cs = models.intent.score_call(call)
             if isinstance(cs, dict):
                 # the pooler returns "intent_score"; matching only on "score"
                 # meant this branch never fired, the dict fell through to
@@ -261,7 +271,6 @@ def build_features(
         except Exception:
             pass
 
-    spans = tag_entities(models, call, use_gold=use_gold_entities, notes=detail)
     detail["entities"] = [s.to_dict() for s in spans]
     n_tok = max(sum(len(t.tokens) for t in call.turns), 1)
     counts: Dict[str, int] = {}

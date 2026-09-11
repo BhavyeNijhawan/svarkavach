@@ -28,7 +28,7 @@ from . import config
 from .config import SETTINGS, result_path
 from .schema import (
     ABLATION_ARMS, Call, EntitySpan, FUSION_FEATURE_NAMES, Turn, decode_bio,
-    feature_vector,
+    feature_vector, tokenize,
 )
 
 # --------------------------------------------------------------------------
@@ -253,7 +253,15 @@ def run_full_evaluation(
     dev = [c for c in p.calls if c.split == "dev"]
     test = [c for c in p.calls if c.split == "test"]
     if not test:
-        test = p.calls
+        # Falling back to the whole corpus here meant every metric was computed
+        # over rows the branches and the arms were fitted on, while
+        # ablation_results.json still recorded "split": "test". A corpus with
+        # no test split is a broken corpus, not a reason to report numbers.
+        raise RuntimeError(
+            "this corpus has no test split, so nothing here can be held out. "
+            "Regenerate it with gen-corpus, which assigns speaker-disjoint "
+            "train, dev and test splits."
+        )
     say(f"splits: {len(train)} train, {len(dev)} dev, {len(test)} test")
 
     provenance: List[Dict[str, Any]] = []
@@ -267,10 +275,20 @@ def run_full_evaluation(
 
     # ---------------------------------------------------------- ablation
     say("featurising splits")
-    Xtr, ytr, _, tr_calls = featurize_corpus(train, models=p.models, with_audio=True)
+    # Fit the arms on dev, not train. The branches were fitted on train, so
+    # featurising train feeds the arms in-sample branch outputs: the tagger
+    # scores entity F1 1.000 on rows it memorised against 0.887 held out, and
+    # an arm fitted on that learns an intercept and weights for a feature
+    # distribution that never occurs at test time. `Pipeline.fit` already
+    # avoids this and explains why; the ablation table was quietly doing the
+    # opposite, which is what the headline comparison rests on.
+    fit_calls = dev if len(dev) >= 20 else train
+    if fit_calls is train:
+        say("  dev split too small, falling back to train, arms will be optimistic")
+    Xfit, yfit, _, _ = featurize_corpus(fit_calls, models=p.models, with_audio=True)
     Xte, yte, feats_te, te_calls = featurize_corpus(test, models=p.models, with_audio=True)
 
-    arms = train_all_arms(Xtr, ytr, kind="logreg")
+    arms = train_all_arms(Xfit, yfit, kind="logreg")
     cells = ["humanxbenign", "humanxscam", "clonedxbenign", "clonedxscam"]
     det_rate: Dict[str, Dict[str, float]] = {}
     overall: Dict[str, Dict[str, float]] = {}
@@ -302,10 +320,20 @@ def run_full_evaluation(
         "detection_rate": det_rate, "overall": overall,
         "n_per_cell": {c: int(sum(1 for x in te_calls if x.cell == c)) for c in cells},
         "threshold": threshold, "split": "test", "n_test": len(te_calls),
+        "arms_fitted_on": ("dev" if fit_calls is dev else "train (dev too small)"),
+        "n_fit": len(fit_calls),
         "generated": _now(),
     }
     _write("ablation_results.json", ablation)
     prov("ablation_results.json", f"{len(te_calls)} held-out calls, threshold {threshold}")
+    # The ablation arms and the shipped fusion model are different fits: the
+    # arms are fitted here on dev for a like-for-like feature comparison, the
+    # shipped model was fitted by Pipeline.fit and is what streaming uses. Two
+    # headline numbers used to come from the two of them with nothing saying
+    # so, presented as one system.
+    headline["_note"] = ("AUC numbers come from the ablation arms fitted in "
+                         "this run; time to detection comes from the shipped "
+                         "fusion model, which is what the console runs")
     headline["fused AUC"] = overall.get("full", {}).get("auc")
     headline["audio-only AUC"] = overall.get("audio_only", {}).get("auc")
     headline["text-only AUC"] = overall.get("text_only", {}).get("auc")
@@ -330,7 +358,12 @@ def run_full_evaluation(
                 (v[c] for f in as_res["eer"].values() for v in f.values()
                  for c in v if v[c] is not None),
                 default=None)
-            headline["best anti-spoof EER"] = round(best, 4) if best is not None else None
+            # A minimum over 5 feature sets x 2 models x every codec condition
+            # on about 70 utterances will find 0.0 whether or not the detector
+            # works. Keep it, name it honestly, and carry the default
+            # condition's clean number next to it.
+            headline["best anti-spoof EER (min over all cells)"] = (
+                round(best, 4) if best is not None else None)
         except Exception:
             pass
 
@@ -621,6 +654,62 @@ def _eval_antispoof(p, calls: Sequence[Call], codecs: Sequence[str], say) -> Opt
     }
 
 
+def _asr_tokens(calls: Sequence[Call], say) -> Optional[List[List[str]]]:
+    """Tokens as an ASR system would produce them, aligned to the gold turns.
+
+    Returns None when that cannot be done honestly, which is most of the time,
+    and says why. The entity metric is span exact, so it needs one token list
+    per gold turn in the same order. Whisper returns a flat transcript with its
+    own segmentation, and this project has no forced aligner, so the two only
+    line up when the segmenter happens to produce the same number of turns.
+
+    Refusing is the point. The previous version of this row ran the tagger
+    over the gold tokens and labelled the result "asr".
+    """
+    try:
+        from .text.asr import ASR
+    except Exception as exc:
+        say(f"  no ASR row: {type(exc).__name__}: {exc}")
+        return None
+
+    asr = ASR()
+    if "whisper" not in str(asr.resolve()).lower():
+        say("  no ASR row: whisper is not installed, so there is nothing to transcribe")
+        return None
+
+    with_audio = [c for c in calls if c.audio_path and Path(c.audio_path).exists()]
+    if len(with_audio) < max(4, len(calls) // 4):
+        say(f"  no ASR row: only {len(with_audio)} of {len(calls)} calls have audio")
+        return None
+
+    out: List[List[str]] = []
+    aligned = skipped = 0
+    for c in calls:
+        gold_n = len(c.turns)
+        got = None
+        if c.audio_path and Path(c.audio_path).exists():
+            try:
+                r = asr.transcribe(c.audio_path)
+                turns = r.get("turns") or []
+                if len(turns) == gold_n:
+                    got = [tokenize(str(t.get("text", ""))) for t in turns]
+            except Exception:
+                got = None
+        if got is None:
+            skipped += 1
+            got = [[] for _ in c.turns]      # counts as a total miss, not as gold
+        else:
+            aligned += 1
+        out.extend(got)
+
+    if aligned < len(calls) // 2:
+        say(f"  no ASR row: only {aligned} of {len(calls)} calls segmented into the "
+            f"same number of turns as the annotation, so the spans cannot be compared")
+        return None
+    say(f"  ASR row: {aligned} calls aligned, {skipped} scored as complete misses")
+    return out
+
+
 def _eval_ner(p, calls: Sequence[Call], say) -> Optional[Dict[str, Any]]:
     taggers: Dict[str, Any] = {}
     if p.models.ner is not None:
@@ -641,29 +730,33 @@ def _eval_ner(p, calls: Sequence[Call], say) -> Optional[Dict[str, Any]]:
     overall: Dict[str, Dict[str, Any]] = {}
     per_type: Dict[str, Dict[str, Any]] = {}
 
+    asr_toks = _asr_tokens(calls, say)
     for name, tagger in taggers.items():
         overall[name] = {}
         per_type[name] = {}
         for src in ("gold", "asr"):
+            src_toks = toks
             if src == "asr":
-                try:
-                    from .text.asr import ASR
-                    # resolve(), not .backend: the wrong attribute raised into
-                    # the except below and skipped this row unconditionally,
-                    # while the JSON still advertised an "asr" column, so the
-                    # console drew a missing measurement as a real 0.00.
-                    if "whisper" not in str(ASR().resolve()).lower():
-                        continue          # nothing to degrade, skip honestly
-                except Exception:
+                # This row is supposed to answer "what does entity F1 do when
+                # the transcript comes from ASR instead of the annotation".
+                # It used to gate on whisper being importable and then run the
+                # identical loop over the GOLD tokens, so on any machine with
+                # whisper installed, which includes Colab, it emitted an "asr"
+                # column numerically identical to "gold" and the console read
+                # that as "entity F1 survives ASR unchanged". No audio was
+                # ever transcribed. Either we really transcribe, or there is
+                # no row.
+                src_toks = asr_toks
+                if src_toks is None:
                     continue
             preds = []
-            for tk in toks:
+            for tk in src_toks:
                 try:
                     b = tagger.predict_turn(tk)
                 except Exception:
                     b = ["O"] * len(tk)
                 preds.append(b if len(b) == len(tk) else ["O"] * len(tk))
-            r = entity_prf(gold, preds, toks)
+            r = entity_prf(gold, preds, src_toks)
             overall[name][src] = {"p": round(r["p"], 4), "r": round(r["r"], 4),
                                   "f1": round(r["f1"], 4), "support": r["support"]}
             per_type[name][src] = {k: {kk: round(vv, 4) if isinstance(vv, float) else vv
@@ -683,7 +776,8 @@ def _eval_intent(p, calls: Sequence[Call], threshold: float, say) -> Optional[Di
     y = np.asarray([c.label_scam for c in calls], dtype=int)
     if len(set(y.tolist())) < 2:
         return None
-    out: Dict[str, Any] = {"models": {}, "generated": _now()}
+    out: Dict[str, Any] = {"models": {}, "threshold": float(threshold),
+                           "generated": _now()}
 
     candidates: Dict[str, Any] = {}
     if p.models.rules is not None:
@@ -698,7 +792,12 @@ def _eval_intent(p, calls: Sequence[Call], threshold: float, say) -> Optional[Di
             a = np.asarray(ts) if ts else np.zeros(1)
             s.append(float(np.clip(0.6 * a.max() + 0.4 * a.mean(), 0, 1)))
         s = np.asarray(s)
-        b = binary_scores(s, y, 0.5)
+        # Use the threshold we were given. This was hardcoded to 0.5 while
+        # every other artifact used 0.65, and the file recorded no threshold
+        # at all, so the intent recall here and the robocall recall in
+        # _eval_robocall_ood were computed on the same quantity at two
+        # different operating points and read as if they were comparable.
+        b = binary_scores(s, y, threshold)
         out["models"][name] = {
             "auc": round(roc_auc(s, y), 4), "accuracy": round(b["accuracy"], 4),
             "f1": round(b["f1"], 4), "precision": round(b["precision"], 4),
@@ -820,9 +919,13 @@ def _eval_robustness(p, calls, model, codecs, threshold, say) -> Optional[Dict[s
     labels: Dict[str, str] = {}
     y = np.asarray([c.label_scam for c in with_audio], dtype=int)
 
+    failed_by: Dict[str, int] = {}
+    errors: Dict[str, str] = {}
     for codec in codecs:
         scores = []
         is_real = True
+        n_failed = 0
+        last_error = ""
         for c in with_audio:
             try:
                 x, sr = read_audio(c.audio_path, sr=SETTINGS.frame.sr)
@@ -831,19 +934,44 @@ def _eval_robustness(p, calls, model, codecs, threshold, say) -> Optional[Dict[s
                     is_real = bool(info.get("real_codec", True)) and is_real
                 f, _ = build_features(c, audio=x, sr=sr, models=p.models)
                 scores.append(float(model.predict_one(f)))
-            except Exception:
-                scores.append(0.0)
-        s = np.asarray(scores)
-        auc_by[codec] = round(roc_auc(s, y), 4)
-        eer_by[codec] = round(eer(s, y)[0], 4)
-        real[codec] = is_real
+            except Exception as exc:
+                # Not 0.0. A call that could not be read, degraded or
+                # featurised has no score, and giving it the most-benign
+                # possible one makes a codec that broke the pipeline look like
+                # a codec that destroyed the signal. If a whole condition
+                # fails, every score is 0.0, the AUC is exactly 0.5, and the
+                # table reads as a real measurement of a hard channel.
+                scores.append(float("nan"))
+                n_failed += 1
+                last_error = f"{type(exc).__name__}: {exc}"
+        s = np.asarray(scores, dtype=float)
+        ok = np.isfinite(s)
+        failed_by[codec] = int(n_failed)
+        if last_error:
+            errors[codec] = last_error
         labels[codec] = (CODECS.get(codec, {}) or {}).get("label", codec)
-        say(f"  {codec}: AUC {auc_by[codec]}")
+        real[codec] = is_real
+        # Score only the calls that produced a score, and refuse to report a
+        # number at all once too many are missing for it to mean anything.
+        if ok.sum() < max(8, int(0.6 * len(s))) or len(set(y[ok].tolist())) < 2:
+            auc_by[codec] = None
+            eer_by[codec] = None
+            say(f"  {codec}: not reported, {n_failed} of {len(s)} calls failed"
+                + (f" ({last_error})" if last_error else ""))
+            continue
+        auc_by[codec] = round(roc_auc(s[ok], y[ok]), 4)
+        eer_by[codec] = round(eer(s[ok], y[ok])[0], 4)
+        say(f"  {codec}: AUC {auc_by[codec]}"
+            + (f"  [{n_failed} calls failed]" if n_failed else ""))
 
     return {
         "codecs": list(codecs), "auc": auc_by, "eer": eer_by,
         "real_codec": real, "labels": labels, "n": len(with_audio),
+        "n_failed": failed_by, "errors": errors,
         "ffmpeg": bool(config.find_ffmpeg()), "generated": _now(),
+        "note": ("auc and eer are null for a condition where too many calls "
+                 "failed to score. real_codec false means the numpy stand-in "
+                 "ran, not the actual codec"),
     }
 
 

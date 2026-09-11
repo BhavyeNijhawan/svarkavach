@@ -36,3 +36,13 @@ data/uploads/
 # synthesis temp files. These leaked into a commit once because the cleanup
 # only ran on the success path; see neural_tts._synth_one.
 *.part
+
+# Results and fitted models are outputs, not source. Committing them meant a
+# fresh clone arrived carrying four result files, and the Drive checkpointer
+# read that as "evaluation already done" and skipped the one stage the Colab
+# notebook exists to run. The numbers it then printed were from the checkout.
+data/results/*.json
+data/models/*
+data/corpus/manifest.json
+!data/results/.gitkeep
+!data/models/.gitkeep

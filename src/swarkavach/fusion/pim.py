@@ -263,8 +263,13 @@ def segment_arousal(x: np.ndarray, sr: int) -> Dict[str, float]:
     """Acoustic arousal of one audio segment, plus the parts it came from."""
     raw = segment_components(x, sr)
     if raw is None:
-        return {"arousal": 0.0, "f0_cv": 0.0, "f0_span": 0.0,
-                "energy_std": 0.0, "rate_std": 0.0, "voiced_ratio": 0.0}
+        # Keys must match the normal path below, which returns ANCHOR_KEYS.
+        # This returned "energy_std", left over from before that component was
+        # replaced by "emphasis_var", so a consumer reading the components got
+        # a KeyError on short segments only.
+        out = {k: 0.0 for k in ANCHOR_KEYS}
+        out.update({"arousal": 0.0, "voiced_ratio": 0.0})
+        return out
 
     p = {"voiced_ratio": raw["voiced_ratio"]}
     parts = {k: _anchor(raw[k], k) for k in ANCHOR_KEYS}

@@ -30,7 +30,7 @@ import numpy as np
 
 from ..config import SETTINGS
 from ..corpus.lexicon import URGENCY_TERMS, canonical
-from ..schema import Call, tokenize
+from ..schema import Call, EntitySpan, tokenize
 from .normalize import normalize_text
 
 __all__ = ["TfidfIntent", "ENTITY_FEATURE_MAP"]
@@ -44,7 +44,10 @@ ENTITY_FEATURE_MAP: Dict[str, str] = {
     "PAYMENT_HANDLE": "ent_payment",
     "PERSONAL_INFO_REQ": "ent_personal",
     "BANK_ENTITY": "ent_bank",
-    "MONEY_AMOUNT": "ent_payment",
+    # MONEY_AMOUNT deliberately absent. Folding it into ent_payment here while
+    # fusion/featurize.ENT_FEATURE left it out meant one feature name carried
+    # two different quantities inside a single feature vector, depending on
+    # which half of the code computed it.
 }
 
 _ENT_FEATURES: Tuple[str, ...] = (
@@ -163,6 +166,8 @@ class TfidfIntent:
             )
             scores = list(oof[pos:pos + n])
             pos += n
+            # No spans here on purpose: this is the fit, and reading the
+            # gold annotation off the training calls is what training is.
             rows.append(self._pool_features(c, scores))
             call_y.append(int(c.label_scam))
         self.pooler_ = LogisticRegression(
@@ -184,30 +189,42 @@ class TfidfIntent:
     def pool_feature_names() -> List[str]:
         return ["max", "mean", "top2_mean", "frac_above_half", "log_n_turns"] + list(_ENT_FEATURES)
 
-    def _entity_counts(self, call: Call) -> Dict[str, float]:
-        """Entity counts per 100 tokens, from whatever BIO the turns carry.
+    def _entity_counts(self, call: Call,
+                       spans: Optional[Sequence[EntitySpan]] = None) -> Dict[str, float]:
+        """Entity counts per 100 tokens.
 
-        During training that is the gold annotation; at inference it is
-        whatever the NER tagger wrote onto the call, which is the point of
-        keeping the two branches on the same `Turn.bio` field.
+        `spans` is what the NER tagger predicted. Pass it at inference. Leave
+        it None only while fitting, where reading the gold annotation off
+        `Turn.bio` is legitimate because that is what training data is.
+
+        This used to always read `Turn.bio`, with a docstring asserting that
+        at inference the tagger would have overwritten it. Nothing ever did:
+        `CRFTagger.tag_call` exists and is called from nowhere. So six of the
+        eleven pooler features were gold annotations on held-out calls, and
+        since the pooler's output overwrites `intent_score`, the single
+        highest weighted fusion feature was a function of the answer key.
+        That is the same leak `featurize.tag_entities` was fixed for, arriving
+        through a different door, and it moved the mean scam score on the test
+        split from 0.741 to 0.960.
         """
         counts = {k: 0.0 for k in _ENT_FEATURES}
-        n_tokens = 0
-        for t in call.turns:
-            n_tokens += len(t.tokens)
-            for span in t.entities():
-                key = ENTITY_FEATURE_MAP.get(span.type)
-                if key:
-                    counts[key] += 1.0
+        n_tokens = sum(len(t.tokens) for t in call.turns)
+        if spans is None:
+            spans = [sp for t in call.turns for sp in t.entities()]
+        for span in spans:
+            key = ENTITY_FEATURE_MAP.get(span.type)
+            if key:
+                counts[key] += 1.0
         scale = 100.0 / max(1, n_tokens)
         return {k: v * scale for k, v in counts.items()}
 
-    def _pool_features(self, call: Call, turn_scores: Sequence[float]) -> List[float]:
+    def _pool_features(self, call: Call, turn_scores: Sequence[float],
+                       spans: Optional[Sequence[EntitySpan]] = None) -> List[float]:
         s = np.asarray(list(turn_scores), dtype=float)
         if s.size == 0:
             s = np.zeros(1)
         top2 = np.sort(s)[-2:].mean()
-        ent = self._entity_counts(call)
+        ent = self._entity_counts(call, spans)
         return [
             float(s.max()),
             float(s.mean()),
@@ -240,22 +257,26 @@ class TfidfIntent:
             out[i] = float(p)
         return out
 
-    def score_call(self, call: Call) -> Dict[str, float]:
+    def score_call(self, call: Call,
+                   spans: Optional[Sequence[EntitySpan]] = None) -> Dict[str, float]:
         """Call-level score plus the intent-group fusion features.
 
         Keys match `schema.FUSION_FEATURES` for the intent group, so the fusion
         layer can merge the result without renaming anything.
+
+        `spans` are the tagger's predictions. Callers that have them must pass
+        them; see `_entity_counts` for what happens when they do not.
         """
         caller = [t for t in call.turns if t.speaker == "caller" and t.tokens]
         turns = caller if (self.caller_only and caller) else [t for t in call.turns if t.tokens]
         scores = self.score_turns([t.tokens for t in turns])
-        feats = self._pool_features(call, scores)
+        feats = self._pool_features(call, scores, spans)
         if self.pooler_ is not None:
             call_score = float(self.pooler_.predict_proba(np.asarray([feats]))[0, 1])
         else:
             call_score = float(np.mean(scores)) if scores else 0.0
         all_caller_tokens = [w for t in turns for w in t.tokens]
-        ent = self._entity_counts(call)
+        ent = self._entity_counts(call, spans)
         out = {
             "intent_score": call_score,
             "intent_max_turn": float(max(scores) if scores else 0.0),

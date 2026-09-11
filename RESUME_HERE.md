@@ -124,6 +124,66 @@ verdict goes into the manifest, so this cannot silently come back.
   and light theme left it unreadable because the SVG baked in dark-theme
   colours at render time.
 
+## Bugs found by an audit of the whole pipeline
+
+All of these produced a number that looked fine. Listed so they are not
+reintroduced.
+
+**Results that were not this run's.** A fresh clone shipped four files in
+`data/results/`, and the Drive checkpointer decided a stage was done by
+counting local files, so a brand new session concluded evaluation had already
+happened, skipped it, printed the checked-in numbers as its own, and pushed
+them back stamped as a Colab run. Skipping is now keyed on what Drive actually
+returned in this session, and results and models are no longer committed.
+
+**The answer key inside the highest weighted feature.** `TfidfIntent`
+`_entity_counts` read `Turn.bio`, which is the gold annotation, and its output
+overwrites `intent_score`. `CRFTagger.tag_call` was the only thing that would
+ever have replaced that with predictions, and it is called from nowhere. Mean
+scam score on the test split was 0.960 with the annotation present, 0.741
+without. It now takes the predicted spans as an argument, and blanking the
+gold BIO changes the score by exactly zero.
+
+**An "ASR" row that was the gold row.** `_eval_ner` gated on whisper being
+importable and then ran the tagger over the gold tokens, so on Colab it
+emitted an asr column identical to the gold one and the console read it as
+"entity F1 survives ASR unchanged". Nothing was ever transcribed. It now
+transcribes for real, or there is no row and the log says why.
+
+**Ablation arms fitted on in-sample branch outputs.** `Pipeline.fit` fits
+fusion on dev and explains why; `run_full_evaluation` then fitted its own arms
+on train, where the tagger scores 1.000 because it memorised those rows. The
+arms now fit on dev, and the file records which.
+
+**Two headline numbers from two different classifiers.** Fused AUC came from
+the ablation arms, time to detection from the shipped fusion model, presented
+as one system. Now stated in the file.
+
+**A threshold that was ignored.** `_eval_intent` took a threshold argument and
+used 0.5, while everything else used 0.65 and the file recorded no threshold,
+so its recall and the robocall recall were not comparable.
+
+**A failure that scored 0.0.** The codec sweep gave any call that failed to
+read, degrade or featurise the most benign possible score. A condition that
+failed entirely produced AUC exactly 0.5, which reads as a hard channel rather
+than a broken one. Failures are now counted, excluded, and the number is
+withheld once too many are missing.
+
+**Colour, not level.** See REPORT section 4.7. Level-matched white noise
+against real line hiss separated the classes at AUC 1.000 on spectral tilt,
+which is what nine EERs of exactly 0.0 were measuring.
+
+**Stages that failed and exited 0.** `train` returned normally with
+`failed: ...` in its report, `fetch-data` swallowed download and pair-build
+errors, and `gen-corpus` fell back to speech-shaped noise per call when the
+synthesis service was unreachable. All three now exit non-zero, and gen-corpus
+checks how many calls really came from the neural backend.
+
+**Tests writing into the real data directory.** `test_checkpoints` set
+`SWARKAVACH_DATA` at module import, which is too late under pytest, and left
+100 byte stub archives in `data/raw` that `fetch-data` accepted as real
+downloads. There is a `conftest.py` now, and the archive check is by size.
+
 ## Running it
 
 **Training and evaluation happen on Colab, not on this machine.** That was the

@@ -99,6 +99,7 @@ ARTIFACTS: Dict[str, Dict[str, Any]] = {
 }
 
 _MOUNTED: Optional[Path] = None
+_RESTORED: Dict[str, bool] = {}
 
 
 # --------------------------------------------------------------------------
@@ -341,8 +342,18 @@ def restore(name: str, quiet: bool = False) -> bool:
 
 
 def restore_all(names: Optional[List[str]] = None, quiet: bool = False) -> Dict[str, bool]:
-    """Pull back everything that exists in Drive. Call this once at the start."""
+    """Pull back everything that exists in Drive. Call this once at the start.
+
+    The returned map is authoritative for what may be skipped. Do not decide
+    that from what is on disk: a fresh clone already carries tracked files
+    under `data/`, and counting them told a brand new session that evaluation
+    was already done, so the one stage the whole notebook exists to run was
+    skipped and four JSON files from the git checkout were printed, saved to
+    Drive and pushed back as that session's results.
+    """
+    global _RESTORED
     if drive_dir() is None:
+        _RESTORED = {}
         return {}
     out = {}
     if not quiet:
@@ -351,7 +362,13 @@ def restore_all(names: Optional[List[str]] = None, quiet: bool = False) -> Dict[
         out[n] = restore(n, quiet=quiet)
     if not quiet and not any(out.values()):
         print("  nothing checkpointed yet, this looks like the first run")
+    _RESTORED = dict(out)
     return out
+
+
+def restored() -> Dict[str, bool]:
+    """What this session actually pulled back from Drive."""
+    return dict(_RESTORED)
 
 
 def save_all(names: Optional[List[str]] = None, quiet: bool = False) -> Dict[str, bool]:
@@ -400,21 +417,36 @@ def print_status() -> None:
               f"{('yes' if r['in_drive'] else 'no'):>10s}  {r['stage']}")
 
 
+#: stage -> (artifacts that must ALL have come back, minimum files each needs)
+_STAGE_REQUIRES: Dict[str, Dict[str, int]] = {
+    "download": {"raw": 3, "robocall": 1},
+    "pairs": {"pairs": 20},
+    "corpus": {"corpus": 100},
+    "train": {"models": 8},
+    "evaluate": {"results": 6},
+}
+
+
 def what_can_be_skipped() -> List[str]:
-    """Stages whose output is already present, so the notebook can skip them."""
+    """Stages whose output Drive gave back, so the notebook can skip them.
+
+    Two conditions, both required. The artifact has to have been restored in
+    THIS session, which is what makes it the output of a previous run rather
+    than something the git checkout happened to ship, and it then has to be
+    large enough to be complete.
+
+    The size floors are deliberately above what a fresh clone carries and
+    above what a half finished stage leaves. `models` needs 8 because
+    `Pipeline.fit` writes the entity, intent and act models first and the
+    fusion models last, so a training run that died in the fusion stage still
+    leaves five files behind and used to satisfy a floor of five.
+    """
     done = []
     st = status()
-    if st["raw"]["local_files"] >= 2 and st["robocall"]["local_files"] >= 1:
-        # the source archives and the transcript CSV, not the extracted audio
-        done.append("download")
-    if st["pairs"]["local_files"] > 20:
-        done.append("pairs")
-    if st["corpus"]["local_files"] > 100:
-        done.append("corpus")
-    if st["models"]["local_files"] >= 5:
-        done.append("train")
-    if st["results"]["local_files"] >= 3:
-        done.append("evaluate")
+    got = restored()
+    for stage, needs in _STAGE_REQUIRES.items():
+        if all(got.get(a) and st[a]["local_files"] >= n for a, n in needs.items()):
+            done.append(stage)
     return done
 
 

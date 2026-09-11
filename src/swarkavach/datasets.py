@@ -392,6 +392,46 @@ def noise_floor_db(x, sr: int = TARGET_SR) -> float:
     return float(np.percentile(db, 10))
 
 
+def _quiet_spectrum(x, sr: int, n_fft: int = 256):
+    """Average magnitude spectrum of the quietest frames, unit mean gain.
+
+    This is the colour of the recording's own noise: line hiss, room tone and
+    whatever the codec left behind. It is not flat, and that matters, see
+    `match_channel`.
+    """
+    import numpy as np
+
+    from .dsp.framing import frame_signal, short_time_energy
+
+    hop = n_fft // 2
+    if x.size < n_fft * 4:
+        return None
+    fr = frame_signal(x, n_fft, hop, window="hamming")
+    if fr.shape[0] < 8:
+        return None
+    e = short_time_energy(fr)
+    k = max(4, int(0.15 * fr.shape[0]))
+    quiet = fr[np.argsort(e)[:k]]
+    mag = np.abs(np.fft.rfft(quiet, n=n_fft, axis=-1)).mean(axis=0)
+    m = float(mag.mean())
+    return (mag / m) if m > 1e-12 else None
+
+
+def _shaped_noise(n_samples: int, template, rng, n_fft: int = 256):
+    """White noise recoloured to a magnitude template."""
+    import numpy as np
+
+    n = rng.normal(0.0, 1.0, n_samples).astype(np.float64)
+    if template is None or n_samples < 8:
+        return n.astype(np.float32)
+    N = np.fft.rfft(n)
+    shape = np.interp(np.linspace(0.0, 1.0, N.size),
+                      np.linspace(0.0, 1.0, template.size), template)
+    y = np.fft.irfft(N * shape, n=n_samples)
+    sd = float(np.std(y))
+    return (y / sd).astype(np.float32) if sd > 1e-12 else n.astype(np.float32)
+
+
 def match_channel(bonafide, spoof, sr: int = TARGET_SR, seed: int = 0,
                   codec: str = "g711u"):
     """Put both sides of a pair through the same channel.
@@ -451,7 +491,16 @@ def match_channel(bonafide, spoof, sr: int = TARGET_SR, seed: int = 0,
         # noise_floor_db is scale equivariant: multiplying a signal by k moves
         # its floor by 20*log10(k). So measure the floor of unit-scale noise
         # once, then solve for k exactly.
-        n = rng.normal(0.0, 1.0, s.size).astype(np.float32)
+        # Shape the noise like the partner recording's own noise, do not use
+        # white noise. Matching the LEVEL and not the SPECTRUM leaves the two
+        # classes with the same floor and different colour, and every front
+        # end here (LFCC, MFCC, GFCC, CQCC, LPCC) reads spectral shape
+        # directly. That is a shortcut the detector can take instead of
+        # listening to the voice, and the level-only audit below could not
+        # see it: nine of ten feature-set by model cells reported an equal
+        # error rate of exactly 0.0, which is not what a hard problem looks
+        # like.
+        n = _shaped_noise(s.size, _quiet_spectrum(b, sr), rng)
         f_unit = noise_floor_db(n, sr)
         k = 10.0 ** ((target - f_unit) / 20.0)
         s = (s + n * k).astype(np.float32)
@@ -624,11 +673,26 @@ def confound_audit(manifest_items: Sequence[Dict[str, Any]],
         fr = frame_signal(x, 200, 80, window="hamming")
         e = short_time_energy(fr)
         db = 10.0 * np.log10(np.maximum(e, 1e-12))
+        # Spectral shape of the quiet frames, which is where an injected
+        # noise floor of the wrong colour shows up. Level statistics alone
+        # cannot see it, and they were the only thing this audit measured.
+        qs = _quiet_spectrum(x, sr)
+        if qs is not None:
+            f = np.linspace(0.0, sr / 2.0, qs.size)
+            w = qs / max(float(qs.sum()), 1e-12)
+            centroid = float((f * w).sum())
+            lo = float(qs[f < 1000.0].mean()) if (f < 1000.0).any() else 1e-6
+            hi = float(qs[f > 2500.0].mean()) if (f > 2500.0).any() else 1e-6
+            tilt = float(20.0 * np.log10(max(hi, 1e-9) / max(lo, 1e-9)))
+        else:
+            centroid, tilt = 0.0, 0.0
         rows[int(it["label"])].append({
             "noise_floor_db": float(np.percentile(db, 10)),
             "snr_proxy_db": float(np.percentile(db, 95) - np.percentile(db, 10)),
             "zcr_mean": float(np.mean(zero_crossing_rate(fr))),
             "duration": float(x.size) / sr,
+            "quiet_centroid_hz": centroid,
+            "quiet_tilt_db": tilt,
         })
 
     out: Dict[str, Any] = {"per_statistic": {}, "n_bonafide": len(rows[0]),
