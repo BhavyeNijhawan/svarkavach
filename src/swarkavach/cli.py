@@ -99,14 +99,36 @@ def fetch_data(
         if "archive" in spec:
             dest = config.RAW_DIR / spec["archive"]
             if dest.exists():
-                console.print(f"  [dim]{name}: already present[/]")
-                continue
+                # Existence is not the question, plausibility is. A download
+                # killed halfway, a Drive restore that ran out of quota, or a
+                # test that wrote a stub all leave a file here that this used
+                # to accept, and then nothing downloads and the failure shows
+                # up much later as an empty corpus. Anything under a tenth of
+                # the expected size is not the archive.
+                have = dest.stat().st_size
+                floor = int(spec["size_mb"] * 1e6 * 0.1)
+                if have >= floor:
+                    console.print(f"  [dim]{name}: already present, "
+                                  f"{have / 1e6:.0f} MB[/]")
+                    continue
+                console.print(f"  [yellow]{name}: {have / 1e6:.1f} MB on disk but "
+                              f"{spec['size_mb']} MB expected, refetching[/]")
+                dest.unlink()
+                extracted = config.RAW_DIR / spec["archive"].replace(".tar.gz", "")
+                if extracted.is_dir():
+                    shutil.rmtree(extracted, ignore_errors=True)
             console.print(f"  {name}: {spec['size_mb']} MB from {spec['url']}")
             tmp = dest.with_suffix(dest.suffix + ".part")
             try:
                 urllib.request.urlretrieve(spec["url"], tmp)
+                got = tmp.stat().st_size
+                if got < int(spec["size_mb"] * 1e6 * 0.1):
+                    tmp.unlink()
+                    raise RuntimeError(
+                        f"server returned {got / 1e6:.1f} MB, expected about "
+                        f"{spec['size_mb']} MB")
                 tmp.rename(dest)
-                console.print(f"    [green]done[/] {dest.stat().st_size / 1e6:.0f} MB")
+                console.print(f"    [green]done[/] {got / 1e6:.0f} MB")
             except Exception as exc:
                 console.print(f"    [red]failed: {exc}[/]")
         else:

@@ -10,8 +10,10 @@ not require either.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
+import shutil
 import sys
 import tempfile
 from pathlib import Path
@@ -19,11 +21,47 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
-_TMP = Path(tempfile.mkdtemp(prefix="swarkavach_ckpt_"))
-os.environ["SWARKAVACH_DATA"] = str(_TMP)
+NL = chr(10)
 
-from swarkavach import colab, config  # noqa: E402
+_TMP = Path(tempfile.mkdtemp(prefix="swarkavach_ckpt_"))
+os.environ.setdefault("SWARKAVACH_DATA", str(_TMP))
+
+from swarkavach import colab  # noqa: E402
 from swarkavach.corpus import neural_tts as N  # noqa: E402
+
+
+@contextlib.contextmanager
+def sandbox(*names: str):
+    """Give these artifacts a scratch directory and a scratch Drive.
+
+    Nothing here reads `config`. Setting SWARKAVACH_DATA at module import is
+    not enough under pytest, because collection imports every test module and
+    the first one to import `swarkavach.config` fixes DATA_DIR for the whole
+    process; a module that sets the variable afterwards is talking to itself
+    while its tests write into the real `data/`. That happened, and the stub
+    archives it left in `data/raw` were enough to make `fetch-data` skip the
+    GramVaani download.
+
+    Overriding the artifact paths directly removes the question. These tests
+    are about the checkpoint machinery, not about where the project keeps its
+    data, so they should not care what DATA_DIR says.
+    """
+    work = Path(tempfile.mkdtemp(prefix="ckpt_work_"))
+    drive = Path(tempfile.mkdtemp(prefix="ckpt_drive_"))
+    saved = {n: colab.ARTIFACTS[n]["path"] for n in names}
+    saved_mount = colab._MOUNTED
+    try:
+        for n in names:
+            target = work / n
+            colab.ARTIFACTS[n]["path"] = (lambda t=target: t)
+        colab._MOUNTED = drive
+        yield work, drive
+    finally:
+        for n, fn in saved.items():
+            colab.ARTIFACTS[n]["path"] = fn
+        colab._MOUNTED = saved_mount
+        shutil.rmtree(work, ignore_errors=True)
+        shutil.rmtree(drive, ignore_errors=True)
 
 
 def _seed_local(name: str, n: int = 5) -> Path:
@@ -40,61 +78,60 @@ def _seed_local(name: str, n: int = 5) -> Path:
 
 def test_archive_round_trip():
     """Save, wipe, restore. The directory has to come back identical."""
-    fake = Path(tempfile.mkdtemp(prefix="fake_drive_"))
-    colab._MOUNTED = fake
-    try:
+    with sandbox("results"):
         d = _seed_local("results")
-        before = sorted(p.relative_to(d).as_posix() for p in d.rglob("*") if p.is_file())
+        before = {p.relative_to(d).as_posix(): p.read_bytes()
+                  for p in d.rglob("*") if p.is_file()}
         assert colab.save("results", quiet=True)
 
-        import shutil
         shutil.rmtree(d)
         assert not d.exists()
 
         assert colab.restore("results", quiet=True)
-        after = sorted(p.relative_to(d).as_posix() for p in d.rglob("*") if p.is_file())
-        assert before == after, (before, after)
-    finally:
-        colab._MOUNTED = None
-        import shutil
-        shutil.rmtree(fake, ignore_errors=True)
+        after = {p.relative_to(d).as_posix(): p.read_bytes()
+                 for p in d.rglob("*") if p.is_file()}
+        assert before == after
 
 
 def test_unchanged_artifact_is_not_reuploaded():
     """The second save has to notice nothing moved, or every run re-uploads
-    half a gigabyte of speech cache over a network filesystem."""
-    fake = Path(tempfile.mkdtemp(prefix="fake_drive_"))
-    colab._MOUNTED = fake
-    try:
-        _seed_local("models")
-        assert colab.save("models", quiet=True)
-        arc = fake / "models.tar.gz"
-        stamp = arc.stat().st_mtime_ns
+    half a gigabyte of speech cache over a network filesystem.
 
+    Asserted on the recorded fingerprint rather than the archive's mtime. An
+    mtime comparison passes for the wrong reason when a previous run left a
+    file behind, which is how the leak into the real data directory stayed
+    invisible until it broke on Colab.
+    """
+    with sandbox("models") as (_work, drive):
+        d = _seed_local("models")
+        assert colab.save("models", quiet=True)
+        first = json.loads((drive / "models.meta.json").read_text(encoding="utf-8"))
+        assert first["fingerprint"]["files"] == 6, first
+
+        arc = drive / "models.tar.gz"
+        stamp = arc.stat().st_mtime_ns
         assert colab.save("models", quiet=True)
         assert arc.stat().st_mtime_ns == stamp, "archive was rewritten unnecessarily"
 
-        # a change has to be picked up
-        (colab.ARTIFACTS["models"]["path"]() / "new.json").write_text("{}", encoding="utf-8")
+        # a genuinely new file has to be picked up
+        assert not (d / "brand_new.json").exists()
+        (d / "brand_new.json").write_text('{"x": 1}', encoding="utf-8")
         assert colab.save("models", quiet=True)
-        assert arc.stat().st_mtime_ns != stamp, "a new file did not trigger a save"
-    finally:
-        colab._MOUNTED = None
-        import shutil
-        shutil.rmtree(fake, ignore_errors=True)
+        second = json.loads((drive / "models.meta.json").read_text(encoding="utf-8"))
+        assert second["fingerprint"]["files"] == 7, second
+        assert second["fingerprint"] != first["fingerprint"]
+
+        # and the new file survives a restore
+        shutil.rmtree(d)
+        assert colab.restore("models", quiet=True)
+        assert (d / "brand_new.json").read_text(encoding="utf-8") == '{"x": 1}'
 
 
 def test_restoring_nothing_is_not_an_error():
     """First run. Every restore returns False and nothing raises."""
-    fake = Path(tempfile.mkdtemp(prefix="fake_drive_"))
-    colab._MOUNTED = fake
-    try:
+    with sandbox("pairs", "corpus"):
         assert colab.restore("pairs", quiet=True) is False
         assert colab.restore("corpus", quiet=True) is False
-    finally:
-        colab._MOUNTED = None
-        import shutil
-        shutil.rmtree(fake, ignore_errors=True)
 
 
 def test_no_drive_is_a_silent_noop():
@@ -110,43 +147,56 @@ def test_no_drive_is_a_silent_noop():
 def test_raw_fingerprint_ignores_the_unused_train_archive():
     """RAW_DIR holds gigabytes of extracted audio and a 2 GB archive nothing
     reads. Only the three core archives may count towards the fingerprint, or
-    the artifact reports a change on every single run."""
-    raw = config.RAW_DIR
-    raw.mkdir(parents=True, exist_ok=True)
-    for name in ("GV_Dev_5h.tar.gz", "GV_Eval_3h.tar.gz", "Metadata.tar.gz",
-                 "GV_Train_100h.tar.gz"):
-        (raw / name).write_bytes(b"0" * 100)
-    (raw / "GV_Dev_5h").mkdir(exist_ok=True)
-    for i in range(50):
-        (raw / "GV_Dev_5h" / f"{i}.wav").write_bytes(b"0" * 10)
+    the artifact reports a change on every single run.
 
-    spec = colab.ARTIFACTS["raw"]
-    fp = colab._fingerprint(raw, tuple(spec.get("exclude", ())),
-                            tuple(spec.get("include", ())))
-    assert fp["files"] == 3, fp
+    Written into a scratch directory, never the real one. An earlier version
+    of this test put 100 byte stub archives into `data/raw`, and `fetch-data`
+    skips any archive that already exists, so it convinced the downloader it
+    had GramVaani when it had zeros.
+    """
+    with sandbox("raw") as (work, _drive):
+        raw = colab.ARTIFACTS["raw"]["path"]()
+        raw.mkdir(parents=True, exist_ok=True)
+        for name in ("GV_Dev_5h.tar.gz", "GV_Eval_3h.tar.gz", "Metadata.tar.gz",
+                     "GV_Train_100h.tar.gz"):
+            (raw / name).write_bytes(b"0" * 100)
+        (raw / "GV_Dev_5h").mkdir(exist_ok=True)
+        for i in range(50):
+            (raw / "GV_Dev_5h" / f"{i}.wav").write_bytes(b"0" * 10)
+
+        spec = colab.ARTIFACTS["raw"]
+        fp = colab._fingerprint(raw, tuple(spec.get("exclude", ())),
+                                tuple(spec.get("include", ())))
+        assert fp["files"] == 3, fp
 
 
 def test_robocall_transcripts_reads_the_csv_alone():
     """A synthetic metadata.csv, so this runs without the 1.7 GB clone."""
-    from swarkavach.datasets import DATASETS, robocall_transcripts
+    from swarkavach import datasets as D
 
-    root = config.RAW_DIR / DATASETS["robocall"]["dir"]
-    root.mkdir(parents=True, exist_ok=True)
-    (root / "metadata.csv").write_text(
-        "file_name,language,transcript,case_details,case_pdf\n"
-        'audio/a.wav,en,"Your Amazon account has been charged. Press one now.",case-a,p.pdf\n'
-        'audio/b.wav,zh,"Ni hao this is a longer line with enough words",case-b,p.pdf\n'
-        'audio/c.wav,en,"short",case-c,p.pdf\n',
-        encoding="utf-8")
+    root = Path(tempfile.mkdtemp(prefix="ckpt_rc_"))
+    (root / "metadata.csv").write_text(NL.join([
+        "file_name,language,transcript,case_details,case_pdf",
+        'audio/a.wav,en,"Your Amazon account has been charged. Press one now.",case-a,p.pdf',
+        'audio/b.wav,zh,"Ni hao this is a longer line with enough words",case-b,p.pdf',
+        'audio/c.wav,en,"short",case-c,p.pdf',
+        "",
+    ]), encoding="utf-8")
 
-    rows = robocall_transcripts()
-    # the one-word row is dropped, the other two survive
-    assert len(rows) == 2, rows
-    assert rows[0]["id"] == "a"
-    assert {r["language"] for r in rows} == {"en", "zh"}
-    assert "Amazon" in rows[0]["transcript"]
-
-    assert len(robocall_transcripts(limit=1)) == 1
+    saved = D.RAW_DIR
+    try:
+        D.RAW_DIR = root.parent
+        D.DATASETS["robocall"] = dict(D.DATASETS["robocall"], dir=root.name)
+        rows = D.robocall_transcripts()
+        # the one-word row is dropped, the other two survive
+        assert len(rows) == 2, rows
+        assert rows[0]["id"] == "a"
+        assert {r["language"] for r in rows} == {"en", "zh"}
+        assert "Amazon" in rows[0]["transcript"]
+        assert len(D.robocall_transcripts(limit=1)) == 1
+    finally:
+        D.RAW_DIR = saved
+        shutil.rmtree(root, ignore_errors=True)
 
 
 def test_cloned_caller_holds_a_flat_contour():
