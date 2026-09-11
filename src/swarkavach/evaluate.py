@@ -462,6 +462,7 @@ def _eval_antispoof(p, calls: Sequence[Call], codecs: Sequence[str], say) -> Opt
         return None
     feature_sets = ["lfcc", "gfcc", "mfcc", "cqcc", "lpcc"]
     models = ["gmm", "gbm"]
+    gmm_fit: Dict[str, Any] = {}
     eer_tbl: Dict[str, Dict[str, Dict[str, Optional[float]]]] = {}
     tdcf_tbl: Dict[str, Dict[str, Dict[str, Optional[float]]]] = {}
     det_store: List[Dict[str, Any]] = []
@@ -519,6 +520,20 @@ def _eval_antispoof(p, calls: Sequence[Call], codecs: Sequence[str], say) -> Opt
                 spoof = np.vstack([frame_features(x, sr, fs) for (x, sr), lab in zip(audio_train, y_train) if lab == 1])
                 g = GMMScorer().fit(bona, spoof)
             fitted["gmm"] = ("gmm", g)
+            # A mixture that ran out of iterations without converging still
+            # scores, and still produces an EER that looks like any other. It
+            # is not one. Record it next to the number rather than leaving it
+            # in the object where nobody reads it.
+            meta = getattr(g, "meta_", {}) or {}
+            if not (meta.get("converged_bona", True) and meta.get("converged_spoof", True)):
+                say(f"  {fs} gmm did not converge, treat its EER with suspicion")
+            gmm_fit[fs] = {
+                "converged_bona": meta.get("converged_bona"),
+                "converged_spoof": meta.get("converged_spoof"),
+                "n_components": meta.get("n_components"),
+                "n_frames_bona": meta.get("n_frames_bona"),
+                "n_frames_spoof": meta.get("n_frames_spoof"),
+            }
         except Exception as exc:
             say(f"  {fs} gmm failed: {exc}")
         try:
@@ -592,6 +607,10 @@ def _eval_antispoof(p, calls: Sequence[Call], codecs: Sequence[str], say) -> Opt
         "det": det_store, "n_train": len(audio_train), "n_test": len(with_audio),
         "note": "min_tdcf here is a cost-weighted operating point with the ASV stage fixed",
         "evaluated_on": source,
+        "gmm_fit": gmm_fit,
+        "gmm_converged": all(
+            (v.get("converged_bona") is not False) and (v.get("converged_spoof") is not False)
+            for v in gmm_fit.values()) if gmm_fit else None,
         "evaluated_on_note": (
             "real human telephone speech against a neural rendering of the same "
             "transcript, channel matched" if source == "real_pairs" else
