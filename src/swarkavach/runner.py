@@ -28,6 +28,7 @@ import shlex
 import subprocess
 import sys
 import time
+from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence
 
 from . import colab
@@ -437,3 +438,51 @@ def audit_pairs() -> bool:
         print(f"\nWarning: worst statistic AUC {worst:.3f} is higher than the "
               "0.62 this set normally reaches. Read the table above.")
     return True
+
+
+def listen(prefer_cell: str = "clonedxscam", n_turns: int = 10):
+    """Print one call's transcript and return its audio for playback.
+
+    Loads real `Call` objects rather than raw JSON. The notebook cell used to
+    read the call files itself and print `pick["cell"]`, which is a computed
+    property and not a serialised key, so it raised KeyError. Keeping this
+    here means that class of mistake is fixed by a pull.
+
+    Returns an IPython Audio widget, or None. Display it with the cell's
+    return value.
+    """
+    from .corpus.generator import load_corpus
+
+    calls = load_corpus()
+    if not calls:
+        print("no corpus on disk, run the corpus stage first")
+        return None
+
+    pick = next((c for c in calls if c.cell == prefer_cell), calls[0])
+    print(f"{pick.call_id}  |  {pick.scenario}  |  {pick.cell}  |  split {pick.split}")
+    info = (pick.meta or {}).get("audio_info") or {}
+    print(f"rendered by: {info.get('backend', pick.audio_source)}"
+          + (f"  (fell back: {info['fallback_reason']})"
+             if info.get("fallback_reason") else ""))
+    det = info.get("detail") or {}
+    if det.get("caller_voice"):
+        print(f"caller voice: {det['caller_voice'].get('voice')}   "
+              f"callee voice: {(det.get('callee_voice') or {}).get('voice')}")
+        print(f"cloned via  : {det.get('cloned_via')}")
+    print()
+    for t in pick.turns[:n_turns]:
+        print(f"  {t.speaker:7s} {t.act:18s} {t.text}")
+    if len(pick.turns) > n_turns:
+        print(f"  ... {len(pick.turns) - n_turns} more turns")
+
+    if not (pick.audio_path and Path(pick.audio_path).exists()):
+        print()
+        print("no audio file for this call")
+        return None
+    try:
+        from IPython.display import Audio
+
+        return Audio(pick.audio_path)
+    except Exception:
+        print(f"audio at {pick.audio_path}")
+        return None
