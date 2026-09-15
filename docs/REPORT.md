@@ -405,13 +405,26 @@ data:
   sides are now band-limited, trimmed and then matched, in that order, so
   the match is made on the signal the detector sees.
 
-On a 30-pair rebuild the worst statistic falls from 0.81 to 0.69, noise
-floor from 0.71 to 0.50, and the colour and trailing-silence statistics sit
-at chance. What is left is mostly dynamic range, 0.68: a spontaneous field
-recording varies in level more than a read rendering does. That is a
-property of the speech rather than of the channel, and it is the kind of
-thing the branch is supposed to read, but it is worth knowing that a single
-number gets to 0.68 on its own before any model runs.
+**The set the results were measured on.** 600 pairs, 1200 clips, 890 train
+and 310 test, speaker-disjoint. The audit's worst statistic is 0.70 after
+conditioning and 0.72 on the raw files, a weak residual leak by its own
+scale, down from 0.81 when the matching was one-directional. Noise floor,
+colour, trailing silence and DC all sit near chance; what is left is mostly
+dynamic range, because a spontaneous field recording varies in level more
+than a read rendering does. That is a property of the speech rather than of
+the channel, and it is the kind of thing the branch is supposed to read, but
+it is worth knowing that a single number reaches about 0.7 on its own before
+any model runs.
+
+Equal error rates on that set are 0.000 to 0.013 under clean, G.711u and
+G.711a, and 0.000 to 0.032 under GSM, across five feature sets and two
+models. Those are low enough that the honest reading is a limitation of the
+spoof side rather than a strong result: **Microsoft's Hindi voice catalogue
+has two voices**, so every spoof in the set comes from one of two synthesis
+systems, both present in training. A detector only has to recognise those
+two. Real anti-spoofing benchmarks report 1 to 5 percent against dozens of
+systems. GSM is the most informative column, because it is the only
+condition where the channel takes away enough detail to cost anything.
 
 The equal error rates in `data/results/antispoof_results.json` should be
 read against the audit table next to them. A run whose conditioned worst
@@ -457,8 +470,9 @@ order of what they settle:
    block first. The whole-corpus rows saturate, and only part of that was an
    artefact: a scam call really does threaten and really does ask for a code,
    and a bag of words finds that. On this corpus a plain bag-of-words model
-   reaches 0.995 on the paired subjects and 0.972 on the hard subset, so the
+   reaches 0.990 on the whole corpus and 0.947 on the hard subset, so the
    hard subset is the only place an arm comparison has room to say anything.
+   Measured there: text-only 0.993, full 0.998, audio-only 0.362.
 2. **Anti-spoofing** (`antispoof_results.json`). Five feature sets by two
    classical models by channel condition, with DET curves.
 3. **Entity recognition** (`ner_results.json`). CRF against BiLSTM, gold
