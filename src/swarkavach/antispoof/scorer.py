@@ -617,6 +617,8 @@ class AntiSpoofScorer:
         if joblib is None:
             raise RuntimeError("joblib is required to load an AntiSpoofScorer")
         path = Path(path)
+        from ..compat import install_pickle_aliases
+        install_pickle_aliases()
         blob = joblib.load(path)
 
         obj = cls(backend=blob.get("backend", "auto"),

@@ -445,6 +445,8 @@ class ActHMM:
     def load(cls, path) -> "ActHMM":
         import joblib
 
+        from ..compat import install_pickle_aliases
+        install_pickle_aliases()
         d = joblib.load(path)
         m = cls(alpha=d["alpha"], use_gold=d["use_gold"])
         m.acts_ = list(d["acts"])

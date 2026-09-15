@@ -195,6 +195,8 @@ class GBMScorer:
     def load(cls, path: Union[str, Path]) -> "GBMScorer":
         if joblib is None:
             raise RuntimeError("joblib is required to load a GBMScorer")
+        from ..compat import install_pickle_aliases
+        install_pickle_aliases()
         blob = joblib.load(Path(path))
         obj = cls(feature_set=blob.get("feature_set", "lfcc"), seed=blob.get("seed"))
         obj.model = blob.get("model")

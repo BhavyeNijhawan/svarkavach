@@ -351,6 +351,8 @@ class TfidfIntent:
     def load(cls, path) -> "TfidfIntent":
         import joblib
 
+        from ..compat import install_pickle_aliases
+        install_pickle_aliases()
         d = joblib.load(path)
         m = cls(**d["cfg"])
         m.pipeline_ = d["pipeline"]

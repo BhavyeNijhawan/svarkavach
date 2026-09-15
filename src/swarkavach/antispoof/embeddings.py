@@ -420,6 +420,8 @@ class SpeakerEmbedder:
             else:  # pragma: no cover - environment dependent
                 import joblib
 
+                from ..compat import install_pickle_aliases
+                install_pickle_aliases()
                 blob = joblib.load(p)
             obj = cls(feature_set=blob.get("feature_set", "mfcc"),
                       dim=int(blob.get("dim", EMBED_DIM)),

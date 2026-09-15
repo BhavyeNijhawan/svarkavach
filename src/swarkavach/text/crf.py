@@ -557,6 +557,8 @@ class LinearChainCRF:
     def load(cls, path) -> "LinearChainCRF":
         import joblib
 
+        from ..compat import install_pickle_aliases
+        install_pickle_aliases()
         d = joblib.load(path)
         m = cls(l2=d["l2"], max_iter=d["max_iter"], min_freq=d["min_freq"], tol=d["tol"])
         m.labels_ = list(d["labels"])

@@ -299,3 +299,42 @@ if __name__ == "__main__":
             print(f"  FAIL {fn.__name__}: {type(exc).__name__}: {exc}")
     print(f"\n{len(fns) - failed}/{len(fns)} passed")
     sys.exit(1 if failed else 0)
+
+
+def test_pickle_aliases_bridge_a_moved_module():
+    """A model trained on another scikit-learn has to load here.
+
+    Pickle records a class by module path, and scikit-learn's loss extension
+    has reported itself both as bare `_loss` and as `sklearn._loss._loss`
+    across releases. A Colab-trained anti-spoofing model raised
+    ModuleNotFoundError for a class that was present and identical.
+    """
+    import importlib
+    import sys
+
+    from swarkavach import compat
+
+    for name in ("_loss", "sklearn._loss._loss"):
+        sys.modules.pop(name, None)
+    compat._installed = False
+
+    done = compat.install_pickle_aliases()
+    assert compat._installed
+    # whichever spelling is missing here should now resolve
+    for missing, target in done.items():
+        assert sys.modules[missing] is importlib.import_module(target)
+    # at least one spelling has to be reachable, or no model would load
+    assert any(n in sys.modules or _importable(n)
+               for n in ("_loss", "sklearn._loss._loss"))
+
+    # calling twice is a no-op, and never raises
+    compat.install_pickle_aliases()
+
+
+def _importable(name):
+    import importlib
+    try:
+        importlib.import_module(name)
+        return True
+    except Exception:
+        return False

@@ -186,6 +186,8 @@ class FusionModel:
     def load(cls, path: str) -> "FusionModel":
         import joblib
 
+        from ..compat import install_pickle_aliases
+        install_pickle_aliases()
         d = joblib.load(path)
         m = cls(kind=d["kind"], arm=d["arm"])
         m.names = tuple(d["names"])
