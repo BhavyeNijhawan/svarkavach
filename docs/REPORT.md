@@ -343,6 +343,23 @@ The general lesson is worth stating, since it cost two rounds: an audit only
 protects against the shortcuts it thinks to measure. Matching one property of
 a channel does not match the channel.
 
+**What the 15 September run says, and what it cannot say.** With both fixes
+in place, 211 pairs, speaker-disjoint split, 318 train and 104 test: the
+equal error rate is 0.000 in 33 of the 40 feature-set by model by codec cells,
+0.019 in six and 0.038 in one, all of those under GSM. The audit's four level
+statistics sat at 0.55 to 0.66 with zero-crossing rate the worst, a weak
+residual leak by the audit's own scale.
+
+That run could not say whether the colour confound was closed, because the
+audit computed the tilt and centroid of the quiet frames per clip and then
+never scored them. The 0.569 and 0.574 above were measured once by hand, not
+by the build. The audit now scores both, so the next run will show them next
+to the level statistics. Until it does, an EER of 0.000 on this set should be
+described as a TTS-against-field-recording result with the channel matched on
+level and, as far as one manual measurement goes, on colour. The GSM column
+is the more conservative reading, and the robocall figures below rest on the
+text branch and are not affected by any of this.
+
 ## 5. Experimental setup
 
 - 480 calls, balanced across the four cells of {human, cloned} x {benign, scam}

@@ -702,7 +702,14 @@ def confound_audit(manifest_items: Sequence[Dict[str, Any]],
         return out
 
     worst = 0.5
-    for k in ("noise_floor_db", "snr_proxy_db", "zcr_mean", "duration"):
+    # The two colour statistics were computed per clip but never scored, so
+    # the audit could not see the confound the report says it was extended
+    # for. A run then came back with an equal error rate of 0.000 in 33 of 40
+    # cells while the four level statistics sat at 0.55 to 0.66, and there was
+    # no way to tell from the audit whether the spectral shape of the injected
+    # noise still gave the answer away. Now there is.
+    for k in ("noise_floor_db", "snr_proxy_db", "zcr_mean", "duration",
+              "quiet_centroid_hz", "quiet_tilt_db"):
         a = np.array([r[k] for r in rows[0]])
         b = np.array([r[k] for r in rows[1]])
         y = np.array([0] * a.size + [1] * b.size)
