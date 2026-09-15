@@ -689,13 +689,23 @@ def build_antispoof_pairs(
     return payload
 
 
-#: Bumped when the pair build changes in a way that makes an existing set
-#: the wrong set: voice selection, channel matching, filtering. The runner
-#: compares this against the manifest and rebuilds pairs, then the models
-#: and results, when they differ. Version 1 is the build that drew from all
-#: five voices and lost 65 percent of its renders to the three that cannot
-#: read Devanagari, leaving every spoof in two voices.
-PAIRS_BUILD_VERSION = 2
+#: Bumped when the pair build changes in a way that makes an existing set the
+#: wrong set: voice selection, channel matching, filtering, anything that
+#: changes the samples on disk. The runner compares this against the manifest
+#: and rebuilds pairs, then the models and results, when they differ.
+#:
+#: BUMP THIS IN THE SAME COMMIT as any such change. A fix to match_channel
+#: shipped without a bump once, and the next run read the stored audit of the
+#: set built the old way and printed numbers identical to four decimals,
+#: which looks exactly like a fix that did nothing.
+#:
+#:   1  drew from all five voices, so the three that cannot read Devanagari
+#:      returned empty audio: 65 percent of renders lost, two voices left
+#:   2  Devanagari voices only; conditioning moved into the front end
+#:   3  channel matched on the signal the detector sees: both sides
+#:      DC-removed, band-limited and trimmed first, and the quieter side
+#:      lifted to the louder floor instead of only ever lifting the spoof
+PAIRS_BUILD_VERSION = 3
 
 #: Every statistic confound_audit scores. A stored audit missing any of these
 #: was written by an older build and is re-derived from the audio on disk.
