@@ -385,6 +385,34 @@ draws Devanagari voices only, prints its failure count, and carries a build
 version that the runner checks, so a set built the old way is rebuilt
 rather than reused.
 
+**Building the set again found two more.** With the voice pool fixed the
+build produced 600 pairs instead of 211, and the audit stopped the run at a
+worst statistic of 0.81. Two causes, both in the matching rather than the
+data:
+
+- The match only ever added noise to the spoof, when the recording was the
+  noisier side. Half the spoofs go through a vocoder whose noise excitation
+  leaves them noisier than the recording, and for that half nothing happened
+  at all. Noise cannot be taken out of a signal, so the match now picks the
+  louder of the two floors and lifts the quieter side to it, using the
+  recording's own quiet spectrum for both, and solves the scale in power
+  rather than setting the added noise's floor to the target.
+- The floors were matched over the full band and on untrimmed audio, while
+  the detector reads a band-limited, silence-trimmed signal. A render begins
+  and ends in silence and a field recording in room tone, so trimming at
+  feature time took the quietest frames off one side only: two clips matched
+  to within 1 dB came out 6 dB apart by the time they were measured. Both
+  sides are now band-limited, trimmed and then matched, in that order, so
+  the match is made on the signal the detector sees.
+
+On a 30-pair rebuild the worst statistic falls from 0.81 to 0.69, noise
+floor from 0.71 to 0.50, and the colour and trailing-silence statistics sit
+at chance. What is left is mostly dynamic range, 0.68: a spontaneous field
+recording varies in level more than a read rendering does. That is a
+property of the speech rather than of the channel, and it is the kind of
+thing the branch is supposed to read, but it is worth knowing that a single
+number gets to 0.68 on its own before any model runs.
+
 The equal error rates in `data/results/antispoof_results.json` should be
 read against the audit table next to them. A run whose conditioned worst
 statistic is above 0.75 stops before training, and one that passes is still

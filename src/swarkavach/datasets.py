@@ -463,6 +463,32 @@ def match_channel(bonafide, spoof, sr: int = TARGET_SR, seed: int = 0,
     except Exception:
         pass
 
+    # Put both sides down the same phone line before anything is measured.
+    #
+    # A real phone call is band-limited and carries no DC, and the two sides
+    # of this set arrive band-limited differently: the recordings are 8 kHz
+    # telephone MP3 whose encoder stops just under 3 kHz, the renders are
+    # 24 kHz resampled, and the vocoded half carries a DC offset from its
+    # unipolar excitation. Matching the noise floor without doing this
+    # matched it over a band the two sides did not share, so the floors came
+    # out equal full-band and 4 dB apart inside the band the detector reads.
+    from .antispoof.features import (BAND_HIGH_HZ, BAND_LOW_HZ, _brick_wall,
+                                     trim_silence)
+
+    b = _brick_wall(b - float(np.mean(b)), sr, BAND_LOW_HZ, BAND_HIGH_HZ)
+    s = _brick_wall(s - float(np.mean(s)), sr, BAND_LOW_HZ, BAND_HIGH_HZ)
+
+    # Trim here, before the floors are measured, and not only at feature time.
+    #
+    # A render begins and ends in silence; a field recording begins and ends
+    # in room tone. Trimming at feature time therefore took the quietest
+    # frames off the spoof and almost nothing off the recording, which lifted
+    # the spoof's measured floor by 6 dB after the two had been matched to
+    # within 1 dB. The match has to be made on the same signal the detector
+    # is going to see.
+    b = trim_silence(b, sr)
+    s = trim_silence(s, sr)
+
     # Fix the gain FIRST, and to the same peak on both sides. Matching floors
     # and then letting the writer peak-normalise afterwards undoes the whole
     # thing: real speech has a higher crest factor than synthesised speech, so
@@ -477,35 +503,42 @@ def match_channel(bonafide, spoof, sr: int = TARGET_SR, seed: int = 0,
     b = _to_peak(b)
     s = _to_peak(s)
 
-    target = noise_floor_db(b, sr)
-    current = noise_floor_db(s, sr)
+    floor_b = noise_floor_db(b, sr)
+    floor_s = noise_floor_db(s, sr)
 
-    if target - current > 3.0:
-        # Work out the noise scale by measuring rather than by converting
-        # between an SNR and a percentile-of-frame-energy. Those are different
-        # units (short_time_energy sums over the frame, so there is a
-        # 10*log10(frame_len) offset lurking), and getting the conversion
-        # wrong overshot the target by about 18 dB, leaving the SPOOF noisier
-        # than the real recording.
-        #
-        # noise_floor_db is scale equivariant: multiplying a signal by k moves
-        # its floor by 20*log10(k). So measure the floor of unit-scale noise
-        # once, then solve for k exactly.
-        # Shape the noise like the partner recording's own noise, do not use
-        # white noise. Matching the LEVEL and not the SPECTRUM leaves the two
-        # classes with the same floor and different colour, and every front
-        # end here (LFCC, MFCC, GFCC, CQCC, LPCC) reads spectral shape
-        # directly. That is a shortcut the detector can take instead of
-        # listening to the voice, and the level-only audit below could not
-        # see it: nine of ten feature-set by model cells reported an equal
-        # error rate of exactly 0.0, which is not what a hard problem looks
-        # like.
-        n = _shaped_noise(s.size, _quiet_spectrum(b, sr), rng)
+    # Lift BOTH sides to a common floor, not just the spoof.
+    #
+    # The old code added noise to the spoof when the recording was noisier,
+    # and did nothing otherwise. Half the spoofs are put through
+    # `vocoder_artifacts` first, which drives an LPC filter with a noise
+    # excitation and leaves them NOISIER than the recording, so for that half
+    # the branch never fired and the pair went out unmatched. Across 600
+    # pairs the spoof floor came out 7 dB above the bonafide floor, and the
+    # audit read 0.71 on noise floor and 0.81 on dynamic range.
+    #
+    # Noise cannot be taken out of a signal, so the match has to go the other
+    # way: pick the louder of the two floors and bring the quieter side up to
+    # it. Both lifts use the RECORDING's quiet spectrum, so the two classes
+    # end with the same noise level and the same noise colour.
+    #
+    # The scale is solved in power, not by setting the added noise's own
+    # floor to the target: a signal already near the target plus noise at the
+    # target lands about 3 dB above it.
+    shape = _quiet_spectrum(b, sr)
+    target = max(floor_b, floor_s) + 1.0
+
+    def lift(x, current_db):
+        deficit_p = 10.0 ** (target / 10.0) - 10.0 ** (current_db / 10.0)
+        if deficit_p <= 0.0 or shape is None:
+            return np.asarray(x, dtype=np.float32)
+        n = _shaped_noise(x.size, shape, rng)
         f_unit = noise_floor_db(n, sr)
-        k = 10.0 ** ((target - f_unit) / 20.0)
-        s = (s + n * k).astype(np.float32)
+        if not np.isfinite(f_unit):
+            return np.asarray(x, dtype=np.float32)
+        k = 10.0 ** ((10.0 * np.log10(deficit_p) - f_unit) / 20.0)
+        return (x + n * k).astype(np.float32)
 
-    return b.astype(np.float32), np.asarray(s, dtype=np.float32)
+    return lift(b, floor_b), lift(s, floor_s)
 
 
 def _write_pair(u, spoof, i, sr, out_dir, rng, manifest) -> bool:

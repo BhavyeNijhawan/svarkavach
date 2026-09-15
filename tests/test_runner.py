@@ -130,6 +130,36 @@ def test_pair_voices_read_devanagari():
 # --------------------------------------------------------------------------
 
 
+def test_match_channel_equalises_the_floor_in_both_directions():
+    """Whichever side is quieter gets lifted, and the match survives
+    conditioning. It used to only ever add noise to the spoof, so the vocoded
+    half, which is noisier than the recording, went out unmatched."""
+    from swarkavach.antispoof.features import condition
+    from swarkavach.datasets import match_channel, noise_floor_db
+
+    sr = 8000
+    rng = np.random.default_rng(3)
+    speech = _tone_mix(sr, 3.0, [400, 900, 1800])
+    speech[: sr // 2] *= 0.02                      # a quiet head, as speech has
+
+    for label, quiet, loud in (
+        ("spoof quieter", 1e-5, 3e-3),             # a render against room tone
+        ("spoof noisier", 3e-3, 1e-5),             # the vocoded half
+    ):
+        b = speech + loud * rng.standard_normal(speech.size)
+        # a render also carries silence at both ends, which is what used to
+        # make the feature-time trim asymmetric
+        s = np.concatenate([np.zeros(sr // 2),
+                            speech + quiet * rng.standard_normal(speech.size),
+                            np.zeros(sr // 2)])
+        B, S = match_channel(b, s, sr, seed=1)
+        gap = abs(noise_floor_db(B, sr) - noise_floor_db(S, sr))
+        assert gap < 3.0, f"{label}: floors {gap:.1f} dB apart after matching"
+        gap_c = abs(noise_floor_db(condition(B, sr), sr)
+                    - noise_floor_db(condition(S, sr), sr))
+        assert gap_c < 3.0, f"{label}: {gap_c:.1f} dB apart after conditioning"
+
+
 def test_forcing_a_stage_forces_what_depends_on_it():
     from swarkavach.runner import _with_downstream
 
