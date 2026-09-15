@@ -294,6 +294,7 @@ def calibrate_anchors(
     low_pct: float = 10.0,
     high_pct: float = 90.0,
     save: bool = True,
+    flat_tol: float = 0.05,
 ) -> Dict[str, Any]:
     """Re-derive the anchors from corpus audio and optionally save them.
 
@@ -304,8 +305,18 @@ def calibrate_anchors(
 
     Returns a report including the per-class medians, which is what tells you
     whether each component is pointing the right way. A component whose
-    synthetic median sits ABOVE its human median is working against the
-    feature, and that is worth knowing before trusting the number.
+    synthetic median sits clearly ABOVE its human median is working against
+    the feature, and that is worth knowing before trusting the number.
+
+    "Clearly" is measured against the anchor span, not as a bare comparison.
+    On the sim backend the human and synthetic cells differ by design and
+    every component separates by a wide margin. On the edge backend both
+    cells are neural voices, the medians land within a few percent of each
+    other, and a strict `human > synthetic` flips on noise: rate_std once
+    read 0.743 against 0.756, a gap of 1.7 percent of its span, and was
+    printed as WRONG WAY next to an emphasis measure that had been wrong by
+    a factor of one and a half. The two are not the same finding. A gap
+    inside `flat_tol` of the span is reported as flat, which is what it is.
     """
     from pathlib import Path as _Path
 
@@ -346,6 +357,8 @@ def calibrate_anchors(
         "percentiles": [low_pct, high_pct],
         "anchors": {},
         "medians": {},
+        "direction": {},
+        "gap_of_span": {},
         "direction_ok": {},
     }
     if report["n_turns"] < 30:
@@ -365,8 +378,18 @@ def calibrate_anchors(
         mh = float(np.median(h)) if h else float("nan")
         ms = float(np.median(s)) if s else float("nan")
         report["medians"][k] = {"human": round(mh, 5), "synthetic": round(ms, 5)}
-        # arousal is supposed to be HIGHER for human speech
-        report["direction_ok"][k] = bool(np.isfinite(mh) and np.isfinite(ms) and mh > ms)
+        # Arousal is supposed to be HIGHER for human speech. The gap is read
+        # as a fraction of the anchor span so that 0.013 on a span of 0.77 is
+        # called flat rather than wrong.
+        span = new[k][1] - new[k][0]
+        if np.isfinite(mh) and np.isfinite(ms) and span > 1e-9:
+            gap = (mh - ms) / span
+            direction = "ok" if gap > flat_tol else ("wrong" if gap < -flat_tol else "flat")
+        else:
+            gap, direction = float("nan"), "unknown"
+        report["gap_of_span"][k] = round(gap, 4) if np.isfinite(gap) else None
+        report["direction"][k] = direction
+        report["direction_ok"][k] = direction != "wrong"
         report["anchors"][k] = [round(new[k][0], 5), round(new[k][1], 5)]
 
     set_anchors(new)

@@ -407,10 +407,18 @@ class Pipeline:
                 "status": rep.get("status"), "n_turns": rep.get("n_turns"),
                 "anchors": rep.get("anchors"), "direction_ok": rep.get("direction_ok"),
             }
-            bad = [k for k, ok in (rep.get("direction_ok") or {}).items() if not ok]
+            direction = rep.get("direction") or {}
+            bad = [k for k, d in direction.items() if d == "wrong"]
+            flat = [k for k, d in direction.items() if d == "flat"]
             if bad:
-                say(f"  warning: these components read higher for synthetic "
-                    f"speech than for human, so they fight the feature: {bad}")
+                say(f"  warning: these components read clearly higher for "
+                    f"synthetic speech than for human, so they fight the "
+                    f"feature: {bad}")
+            if flat:
+                say(f"  note: {flat} separate the two voice cells by under 5 "
+                    "percent of their span. Expected on the edge backend, "
+                    "where both cells are neural voices; voice detection "
+                    "comes from the anti-spoofing branch, not from here.")
         except Exception as exc:
             report["pim_anchors"] = f"failed: {type(exc).__name__}: {exc}"
             say(f"  anchor calibration failed: {exc}")
