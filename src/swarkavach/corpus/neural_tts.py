@@ -99,8 +99,16 @@ def _stable_hash(*parts: Any) -> int:
     return int.from_bytes(h.digest(), "big")
 
 
-def voice_for_speaker(speaker_id: str, seed: int = 0) -> Dict[str, Any]:
+def voice_for_speaker(speaker_id: str, seed: int = 0,
+                      script: Optional[str] = None) -> Dict[str, Any]:
     """A stable voice, rate, pitch and volume for one speaker id.
+
+    `script` restricts the draw to voices that read that script. The
+    anti-spoofing pair build sends Devanagari text, and three of the five
+    voices are en-IN: they return empty audio for it, after four retries and
+    about half a minute of backoff each. Drawing from the whole pool there
+    lost 65 percent of the renders silently, left every spoof in two voices,
+    and burned about seventy minutes per build on retries.
 
     Five base voices is not many, so the rate, pitch and volume offsets do the
     rest of the work. The ranges are wide enough that two speakers rarely
@@ -111,7 +119,10 @@ def voice_for_speaker(speaker_id: str, seed: int = 0) -> Dict[str, Any]:
     every call they appear in.
     """
     h = _stable_hash("voice", speaker_id, seed)
-    name, gender, script = VOICE_POOL[h % len(VOICE_POOL)]
+    pool = VOICE_POOL if script is None else tuple(v for v in VOICE_POOL if v[2] == script)
+    if not pool:
+        raise ValueError(f"no voice reads script {script!r}")
+    name, gender, script = pool[h % len(pool)]
     rate = -18 + (h >> 8) % 37           # -18% to +18%
     pitch = -14 + (h >> 16) % 29         # -14Hz to +14Hz
     volume = -8 + (h >> 24) % 17         # -8% to +8%

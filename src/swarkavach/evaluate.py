@@ -365,6 +365,12 @@ def run_full_evaluation(
     ablation = {
         "arms": list(arms.keys()), "cells": cells,
         "hard_subset": hard,
+        # The key predates its consumers and is misnamed: it is the fraction
+        # of calls in the cell classified correctly at the threshold, not the
+        # fraction flagged. The report, the console and the write-up all read
+        # it as accuracy; renaming it would touch all three for no gain.
+        "detection_rate_means": "fraction of the cell's calls classified "
+                                "correctly at the threshold (per-cell accuracy)",
         "detection_rate": det_rate, "overall": overall,
         "n_per_cell": {c: int(sum(1 for x in te_calls if x.cell == c)) for c in cells},
         "threshold": threshold, "split": "test", "n_test": len(te_calls),
@@ -445,7 +451,8 @@ def run_full_evaluation(
     # ------------------------------------------------------- robustness
     if not skip_robustness and len(codecs) > 1:
         say("running the channel robustness sweep")
-        rb = _eval_robustness(p, test, arms.get("full"), codecs, threshold, say)
+        rb = _eval_robustness(p, test, arms.get("full"), codecs, threshold, say,
+                              extra_arms={"audio_only": arms.get("audio_only")})
         if rb:
             _write("robustness_results.json", rb)
             prov("robustness_results.json",
@@ -702,6 +709,12 @@ def _eval_antispoof(p, calls: Sequence[Call], codecs: Sequence[str], say) -> Opt
     }
 
 
+#: The last reason _asr_tokens gave for not producing a row. Written into
+#: ner_results.json, because the reason used to live only in the training log
+#: and the JSON still listed "asr" among its transcripts.
+_ASR_SKIP_REASON: Dict[str, Optional[str]] = {"reason": None}
+
+
 def _asr_tokens(calls: Sequence[Call], say) -> Optional[List[List[str]]]:
     """Tokens as an ASR system would produce them, aligned to the gold turns.
 
@@ -717,16 +730,19 @@ def _asr_tokens(calls: Sequence[Call], say) -> Optional[List[List[str]]]:
     try:
         from .text.asr import ASR
     except Exception as exc:
+        _ASR_SKIP_REASON["reason"] = f"  no ASR row: {type(exc).__name__}: {exc}"[len("  no ASR row: "):]
         say(f"  no ASR row: {type(exc).__name__}: {exc}")
         return None
 
     asr = ASR()
     if "whisper" not in str(asr.resolve()).lower():
+        _ASR_SKIP_REASON["reason"] = "  no ASR row: whisper is not installed, so there is nothing to transcribe"[len("  no ASR row: "):]
         say("  no ASR row: whisper is not installed, so there is nothing to transcribe")
         return None
 
     with_audio = [c for c in calls if c.audio_path and Path(c.audio_path).exists()]
     if len(with_audio) < max(4, len(calls) // 4):
+        _ASR_SKIP_REASON["reason"] = f"  no ASR row: only {len(with_audio)} of {len(calls)} calls have audio"[len("  no ASR row: "):]
         say(f"  no ASR row: only {len(with_audio)} of {len(calls)} calls have audio")
         return None
 
@@ -811,11 +827,18 @@ def _eval_ner(p, calls: Sequence[Call], say) -> Optional[Dict[str, Any]]:
                                        for kk, vv in v.items()}
                                    for k, v in r["per_type"].items()}
 
-    return {
-        "models": list(taggers), "transcripts": ["gold", "asr"],
+    scored = sorted({src for name in overall for src in overall[name]},
+                    key=lambda x: ("gold", "asr").index(x) if x in ("gold", "asr") else 9)
+    out = {
+        "models": list(taggers), "transcripts": scored,
         "overall": overall, "per_type": per_type,
         "n_turns": len(toks), "generated": _now(),
     }
+    if "asr" not in scored:
+        # It used to list "asr" whether or not a row was written, and the
+        # reason lived only in the log.
+        out["asr_note"] = _ASR_SKIP_REASON["reason"] or "no ASR row was produced"
+    return out
 
 
 def _eval_intent(p, calls: Sequence[Call], threshold: float, say) -> Optional[Dict[str, Any]]:
@@ -950,7 +973,8 @@ def _eval_robocall_ood(p, benign: Sequence[Call], threshold: float,
     return out
 
 
-def _eval_robustness(p, calls, model, codecs, threshold, say) -> Optional[Dict[str, Any]]:
+def _eval_robustness(p, calls, model, codecs, threshold, say,
+                     extra_arms: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
     from .fusion.featurize import build_features
     from .audioio import read_audio
     from .channel import degrade, CODECS
@@ -969,8 +993,16 @@ def _eval_robustness(p, calls, model, codecs, threshold, say) -> Optional[Dict[s
 
     failed_by: Dict[str, int] = {}
     errors: Dict[str, str] = {}
+    # The full arm's decision is carried almost entirely by text, which no
+    # codec touches, so its row came back identical to four decimals under
+    # four codecs and said nothing about the audio path. The audio-only arm
+    # is scored on the same degraded features, so a codec that hurts the
+    # voice branch shows up somewhere.
+    extra_arms = {k: m for k, m in (extra_arms or {}).items() if m is not None}
+    extra_auc: Dict[str, Dict[str, Optional[float]]] = {k: {} for k in extra_arms}
     for codec in codecs:
         scores = []
+        extra_scores: Dict[str, list] = {k: [] for k in extra_arms}
         is_real = True
         n_failed = 0
         last_error = ""
@@ -982,6 +1014,8 @@ def _eval_robustness(p, calls, model, codecs, threshold, say) -> Optional[Dict[s
                     is_real = bool(info.get("real_codec", True)) and is_real
                 f, _ = build_features(c, audio=x, sr=sr, models=p.models)
                 scores.append(float(model.predict_one(f)))
+                for k, m in extra_arms.items():
+                    extra_scores[k].append(float(m.predict_one(f)))
             except Exception as exc:
                 # Not 0.0. A call that could not be read, degraded or
                 # featurised has no score, and giving it the most-benign
@@ -990,10 +1024,17 @@ def _eval_robustness(p, calls, model, codecs, threshold, say) -> Optional[Dict[s
                 # fails, every score is 0.0, the AUC is exactly 0.5, and the
                 # table reads as a real measurement of a hard channel.
                 scores.append(float("nan"))
+                for k in extra_arms:
+                    extra_scores[k].append(float("nan"))
                 n_failed += 1
                 last_error = f"{type(exc).__name__}: {exc}"
         s = np.asarray(scores, dtype=float)
         ok = np.isfinite(s)
+        for k in extra_arms:
+            es = np.asarray(extra_scores[k], dtype=float)
+            eok = np.isfinite(es)
+            extra_auc[k][codec] = (round(roc_auc(es[eok], y[eok]), 4)
+                                   if eok.sum() >= 8 and len(set(y[eok].tolist())) == 2 else None)
         failed_by[codec] = int(n_failed)
         if last_error:
             errors[codec] = last_error
@@ -1010,9 +1051,11 @@ def _eval_robustness(p, calls, model, codecs, threshold, say) -> Optional[Dict[s
         auc_by[codec] = round(roc_auc(s[ok], y[ok]), 4)
         eer_by[codec] = round(eer(s[ok], y[ok])[0], 4)
         say(f"  {codec}: AUC {auc_by[codec]}"
+            + "".join(f", {k} {extra_auc[k][codec]}" for k in extra_arms)
             + (f"  [{n_failed} calls failed]" if n_failed else ""))
 
     return {
+        "auc_by_arm": {**{"full": dict(auc_by)}, **extra_auc},
         "codecs": list(codecs), "auc": auc_by, "eer": eer_by,
         "real_codec": real, "labels": labels, "n": len(with_audio),
         "n_failed": failed_by, "errors": errors,

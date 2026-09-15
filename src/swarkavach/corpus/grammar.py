@@ -696,13 +696,6 @@ def render_pattern(
 #: Caller lines that are not scenario specific. Used when a scenario does not
 #: define its own pool for an act.
 SHARED_CALLER: Dict[str, Tuple[str, ...]] = {
-    "GREET": (
-        "{GREET_WORD}, {CUST} baat kar rahe hain?",
-        "Hello, {CUST} se baat ho rahi hai kya?",
-        "{GREET_WORD}, ek minute baat kar sakte hain?",
-        "Hello? {FILLER}, {CUST} hain line pe?",
-        "{GREET_WORD}, awaaz aa rahi hai meri?",
-    ),
     "REASSURE": (
         "Ghabraiye mat, aapka paisa bilkul safe hai, bas verification ki baat hai.",
         "Main hoon na, do minute ka kaam hai bas.",
@@ -721,12 +714,6 @@ SHARED_CALLER: Dict[str, Tuple[str, ...]] = {
         "Aap ab bataiye, ya main file reject kar doon?",
         "Mera shift khatam ho raha hai, uske baad koi kuch nahi kar payega.",
         "Aap last warning samajh lijiye, main teesri baar bol {RAHA} hoon.",
-    ),
-    "CLOSE": (
-        "Thik hai sir, verification ho gaya, dhanyavaad.",
-        "Ho gaya ji, koi problem aaye to isi number pe call kar lena.",
-        "Chaliye, aapka kaam ho gaya, rakhta hoon phone.",
-        "Bas itna hi tha, aapka time lene ke liye sorry, dhanyavaad.",
     ),
     "DEADLINE": (
         "Aapke paas sirf {WINDOW} hai, uske baad main kuch nahi kar paunga.",
@@ -750,6 +737,11 @@ SHARED_CALLER: Dict[str, Tuple[str, ...]] = {
 #: politeness of a fraud call is the technique, not a tell.
 NEUTRAL_CALLER: Dict[str, Tuple[str, ...]] = {
     "GREET": (
+        "{GREET_WORD}, {CUST} baat kar rahe hain?",
+        "Hello, {CUST} se baat ho rahi hai kya?",
+        "{GREET_WORD}, ek minute baat kar sakte hain?",
+        "Hello? {FILLER}, {CUST} hain line pe?",
+        "{GREET_WORD}, awaaz aa rahi hai meri?",
         "{GREET_WORD}, {CUST} se baat ho rahi hai?",
         "{GREET_WORD}, {CUST}? Do minute mil sakte hain?",
         "Hello, {CUST} hain? Ek chhoti si baat thi.",
@@ -758,6 +750,11 @@ NEUTRAL_CALLER: Dict[str, Tuple[str, ...]] = {
         "{GREET_WORD}, {FILLER}, {CUST} baat kar rahe hain?",
     ),
     "CLOSE": (
+        "Thik hai sir, verification ho gaya, dhanyavaad.",
+        "Ho gaya ji, koi problem aaye to isi number pe call kar lena.",
+        "Chaliye, aapka kaam ho gaya, rakhta hoon phone.",
+        "Bas itna hi tha, aapka time lene ke liye sorry, dhanyavaad.",
+        "Ho gaya ji, aapka din achha rahe.",
         "Bas itna hi tha, thank you for your time.",
         "Chaliye ji, dhanyavaad, have a good day.",
         "Thik hai, aur koi help chahiye to bata dijiyega, dhanyavaad.",
@@ -783,6 +780,7 @@ NEUTRAL_CALLER: Dict[str, Tuple[str, ...]] = {
     ),
     "INFORM": (
         "Aapke registered number pe ek message bhi gaya hoga, chahe to dekh lijiye.",
+        "Ye {TIME} tak ka kaam hai, uske baad record apne aap update ho jayega.",
         "Ye ek routine process hai, har customer ke liye hota hai.",
         "Hamare system me aapki details hain, bas cross check kar {RAHA} hoon.",
         "Aapka record pending list me dikh raha hai, isliye call kiya.",
@@ -803,13 +801,27 @@ NEUTRAL_CALLEE: Dict[str, Tuple[str, ...]] = {
         "Achha achha, samajh gaya.",
         "Ji main hi hoon, boliye kya baat hai.",
         "{ACK}, main dekh {LETA} hoon.",
+        "{ACK}, wahi hai.",
+        "Haan ji sahi hai.",
+        "{ACK}, thik hai.",
     ),
     "VICTIM_QUESTION": (
         "Achha, aur kitne baje tak time hai?",
+        "Achha, aur koi problem to nahi hai na?",
+        "Achha, aur ye kab ka mamla hai?",
         "Ye online bhi ho jayega ya jaana padega?",
         "Ek baat batao, iske liye kuch lekar aana padega?",
         "Aap kaunse department se bol rahe hain?",
         "Ye message mujhe likhit me mil jayega?",
+    ),
+    "VICTIM_COMPLY": (
+        "{ACK}, {OTP_CODE} hai.",
+        "Haan aaya hai, {OTP_CODE}.",
+        "Achha likh lijiye, {OTP_CODE} hai.",
+        "{ACK}, wahi hai jo aap bol rahe ho.",
+        "Haan sahi hai, likh lijiye.",
+        "{ACK}, correct hai.",
+        "{ACK}, kar deta hoon.",
     ),
     "VICTIM_RESIST": (
         "Ek minute, main baad me call karta hoon.",
@@ -871,6 +883,7 @@ MILD_SCAM: Dict[str, Tuple[str, ...]] = {
         "Kuch karna nahi hai aapko, bas ek routine record check chal raha hai.",
         "Aapke {BANK_ITEM} ka annual record update ho raha hai, isliye ek chhota sa confirmation chahiye.",
         "Ye sirf ek verification call hai, do minute me khatam.",
+        "Ye record {TIME} tak valid rehta hai, isliye aaj hi confirm kar rahe hain.",
         "Hamare system me aapki details thodi purani hain, bas cross check kar {RAHA} hoon.",
     ),
     "REASSURE": (
@@ -885,25 +898,13 @@ MILD_SCAM: Dict[str, Tuple[str, ...]] = {
         "Aap apna {SOFT_PERS} bata dijiye, main file me tick laga {DETA} hoon.",
         "Sirf ek line ka confirmation, aapka {SOFT_PERS} match kar raha hai kya?",
     ),
-    "CONFIRM": (
-        "{ACK}, wahi hai.",
-        "Haan ji sahi hai.",
-        "{ACK}, thik hai.",
-    ),
     "CLOSE": (
         "Bas ho gaya, aapka record update kar diya, dhanyavaad.",
         "Thank you sir, aur kuch nahi chahiye, rakhta hoon.",
-        "Ho gaya ji, aapka din achha rahe.",
     ),
     "VICTIM_QUESTION": (
         "Ye kis cheez ke liye pooch rahe ho?",
         "Aap {BANK} se hi bol rahe ho na?",
-        "Achha, aur koi problem to nahi hai na?",
-    ),
-    "VICTIM_COMPLY": (
-        "{ACK}, wahi hai jo aap bol rahe ho.",
-        "Haan sahi hai, likh lijiye.",
-        "{ACK}, correct hai.",
     ),
 }
 
@@ -1229,9 +1230,10 @@ SCENARIO_ACTS["fake_relative"] = {
     ),
 }
 SCENARIO_ARCS["fake_relative"] = (
-    "GREET CONFIRM IDENTIFY_SELF PROBLEM_STATE VICTIM_QUESTION THREAT DEADLINE ISOLATE REQUEST_SENSITIVE VICTIM_RESIST PRESSURE_ESCALATE VICTIM_COMPLY CLOSE",
-    "GREET IDENTIFY_SELF PROBLEM_STATE CONFIRM VICTIM_QUESTION REASSURE THREAT REQUEST_SENSITIVE ISOLATE PRESSURE_ESCALATE VICTIM_COMPLY CLOSE",
-    "GREET CONFIRM IDENTIFY_SELF PROBLEM_STATE VICTIM_RESIST PRESSURE_ESCALATE THREAT DEADLINE REQUEST_SENSITIVE ISOLATE VICTIM_RESIST CLOSE",
+    "GREET CONFIRM IDENTIFY_SELF SMALLTALK SMALLTALK:caller PROBLEM_STATE VICTIM_QUESTION THREAT DEADLINE ISOLATE REQUEST_SENSITIVE VICTIM_RESIST PRESSURE_ESCALATE VICTIM_COMPLY CLOSE",
+    "GREET IDENTIFY_SELF INFORM CONFIRM PROBLEM_STATE VICTIM_QUESTION REASSURE THREAT REQUEST_SENSITIVE ISOLATE PRESSURE_ESCALATE VICTIM_COMPLY CLOSE",
+    "GREET CONFIRM IDENTIFY_SELF SMALLTALK:caller INFORM PROBLEM_STATE VICTIM_RESIST PRESSURE_ESCALATE THREAT DEADLINE REQUEST_SENSITIVE ISOLATE VICTIM_RESIST CLOSE",
+    "GREET SMALLTALK IDENTIFY_SELF INFORM VICTIM_QUESTION PROBLEM_STATE THREAT REQUEST_SENSITIVE ISOLATE VICTIM_COMPLY CLOSE",
 )
 
 # -- 6. electricity_disconnect --------------------------------------------
@@ -1592,6 +1594,50 @@ HARD_NEGATIVE_ARCS: Dict[str, Tuple[str, ...]] = {
     "telemarketing": (
         "GREET CONFIRM IDENTIFY_SELF INFORM DEADLINE VICTIM_RESIST "
         "REASSURE CLOSE",
+        "GREET IDENTIFY_SELF CONFIRM PROBLEM_STATE INFORM VICTIM_QUESTION "
+        "REASSURE VICTIM_RESIST CLOSE",
+    ),
+    "family_call": (
+        "GREET CONFIRM IDENTIFY_SELF PROBLEM_STATE VICTIM_QUESTION INFORM "
+        "REASSURE CONFIRM CLOSE",
+        "GREET SMALLTALK IDENTIFY_SELF PROBLEM_STATE INFORM VICTIM_QUESTION "
+        "INFORM CONFIRM CLOSE",
+        "GREET CONFIRM IDENTIFY_SELF INFORM VICTIM_RESIST REASSURE "
+        "SMALLTALK:caller CONFIRM CLOSE",
+    ),
+}
+
+# SMALLTALK and VICTIM_RESIST on the benign side of the pairs whose scam side
+# now opens with a chat, so neither act tells a pair apart.
+HARD_NEGATIVE_ARCS["bank_reminder"] += (
+    "GREET SMALLTALK CONFIRM IDENTIFY_SELF PROBLEM_STATE INFORM VICTIM_RESIST "
+    "REASSURE INSTRUCT CLOSE",
+)
+HARD_NEGATIVE_ARCS["delivery_otp"] += (
+    "GREET SMALLTALK:caller CONFIRM IDENTIFY_SELF INFORM VICTIM_RESIST REASSURE "
+    "REQUEST_SENSITIVE VICTIM_COMPLY CLOSE",
+)
+HARD_NEGATIVE_ARCS["telemarketing"] += (
+    "GREET CONFIRM SMALLTALK IDENTIFY_SELF INFORM VICTIM_QUESTION INSTRUCT "
+    "VICTIM_RESIST REASSURE CLOSE",
+)
+
+#: Scam arcs that open the way a benign call does. Without these SMALLTALK
+#: appeared in no scam arc at all, so a single chatty turn identified the
+#: class, and the neutral SMALLTALK lines were dead text on the scam side.
+SCAM_SMALLTALK_ARCS: Dict[str, Tuple[str, ...]] = {
+    "kyc_freeze": (
+        "GREET CONFIRM SMALLTALK IDENTIFY_SELF INFORM PROBLEM_STATE "
+        "AUTHORITY_ASSERT DEADLINE INSTRUCT REQUEST_SENSITIVE VICTIM_COMPLY CLOSE",
+    ),
+    "courier_customs": (
+        "GREET SMALLTALK:caller CONFIRM IDENTIFY_SELF INFORM PROBLEM_STATE "
+        "THREAT DEADLINE REQUEST_SENSITIVE VICTIM_QUESTION PRESSURE_ESCALATE "
+        "VICTIM_COMPLY CLOSE",
+    ),
+    "loan_approval": (
+        "GREET CONFIRM IDENTIFY_SELF SMALLTALK:caller INFORM PROBLEM_STATE "
+        "DEADLINE REQUEST_SENSITIVE VICTIM_QUESTION REASSURE VICTIM_COMPLY CLOSE",
     ),
 }
 
@@ -1603,9 +1649,10 @@ def _install_hard_negatives() -> None:
         for act, lines in acts.items():
             existing = tuple(pool.get(act, ()))
             pool[act] = existing + tuple(l for l in lines if l not in existing)
-    for scen, arcs in HARD_NEGATIVE_ARCS.items():
-        existing = tuple(SCENARIO_ARCS.get(scen, ()))
-        SCENARIO_ARCS[scen] = existing + tuple(a for a in arcs if a not in existing)
+    for table in (HARD_NEGATIVE_ARCS, SCAM_SMALLTALK_ARCS):
+        for scen, arcs in table.items():
+            existing = tuple(SCENARIO_ARCS.get(scen, ()))
+            SCENARIO_ARCS[scen] = existing + tuple(a for a in arcs if a not in existing)
 
 
 MILD_ARCS: Tuple[str, ...] = (
@@ -2212,7 +2259,10 @@ def literal_entity_leaks() -> List[str]:
         ("shared_caller", SHARED_CALLER),
         ("shared_callee", SHARED_CALLEE),
         ("mild", MILD_SCAM),
+        ("benign_caller", BENIGN_CALLER),
         ("benign_callee", BENIGN_CALLEE),
+        ("neutral_caller", NEUTRAL_CALLER),
+        ("neutral_callee", NEUTRAL_CALLEE),
     ):
         for act, patterns in pool.items():
             pools.append((name, act, patterns))
@@ -2249,7 +2299,10 @@ def validate_grammar() -> Dict[str, object]:
         ("shared_caller", SHARED_CALLER),
         ("shared_callee", SHARED_CALLEE),
         ("mild", MILD_SCAM),
+        ("benign_caller", BENIGN_CALLER),
         ("benign_callee", BENIGN_CALLEE),
+        ("neutral_caller", NEUTRAL_CALLER),
+        ("neutral_callee", NEUTRAL_CALLEE),
     ):
         for act, patterns in pool.items():
             all_pools.append((name, act, patterns))
@@ -2427,7 +2480,7 @@ TOPIC_SPINE: Dict[str, Dict[str, Tuple[str, ...]]] = {
         ),
         "PROBLEM_STATE": (
             "Thodi dikkat ho gayi hai, isliye turant call karna pada.",
-            "Ek problem aa gayi hai, ghar pe abhi kisi ko mat batana.",
+            "Ek chhoti si problem aa gayi hai, phone pe hi bata {DETA} hoon.",
         ),
     },
     "offer": {
@@ -2452,9 +2505,9 @@ TOPIC_SPINE: Dict[str, Dict[str, Tuple[str, ...]]] = {
 def _install_topic_spine() -> None:
     """Put the shared setup in front of both variants of every paired topic.
 
-    Prepended rather than appended, so the shared lines are what the sampler
-    reaches first and the scenario's own wording becomes the variation rather
-    than the rule.
+    Order inside a pool does not matter to the sampler, which draws
+    uniformly; prepending is only so the shared lines read first in the
+    source.
     """
     for topic, acts in TOPIC_SPINE.items():
         for side in ("scam", "benign"):
@@ -2499,7 +2552,17 @@ def grammar_fingerprint() -> str:
         "mild_arcs": list(MILD_ARCS),
         "topic_pairs": {k: dict(v) for k, v in sorted(TOPIC_PAIRS.items())},
         "unpaired": list(UNPAIRED_SCENARIOS),
-        "slots": {k: list(v.options) for k, v in sorted(SLOTS.items())},
+        "slots": {k: [v.entity, bool(v.sticky), list(v.options)]
+                  for k, v in sorted(SLOTS.items())},
+        "scenario_slots": {k: {a: list(o) for a, o in sorted(v.items())}
+                           for k, v in sorted(SCENARIO_SLOTS.items())},
+        "gendered_slots": {k: [list(a), list(b)] for k, (a, b) in sorted(GENDERED_SLOTS.items())},
+        "act_speaker": dict(sorted(ACT_SPEAKER.items())),
+        "mild_capable": list(MILD_CAPABLE_SCENARIOS),
+        "mild_excluded": list(MILD_EXCLUDED_ACTS),
+        "hard_negative_scenarios": list(HARD_NEGATIVE_SCENARIOS),
+        "coercive_acts": sorted(COERCIVE_ACTS),
+        "pattern_bias": SCENARIO_PATTERN_BIAS,
     }
     blob = json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")
     return hashlib.sha256(blob).hexdigest()[:16]

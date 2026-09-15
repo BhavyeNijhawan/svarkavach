@@ -343,22 +343,54 @@ The general lesson is worth stating, since it cost two rounds: an audit only
 protects against the shortcuts it thinks to measure. Matching one property of
 a channel does not match the channel.
 
-**What the 15 September run says, and what it cannot say.** With both fixes
-in place, 211 pairs, speaker-disjoint split, 318 train and 104 test: the
-equal error rate is 0.000 in 33 of the 40 feature-set by model by codec cells,
-0.019 in six and 0.038 in one, all of those under GSM. The audit's four level
-statistics sat at 0.55 to 0.66 with zero-crossing rate the worst, a weak
-residual leak by the audit's own scale.
+**What the 15 September run said, and what a review of it found.** With
+both fixes in place, 211 pairs, speaker-disjoint split, 318 train and 104
+test: the equal error rate was 0.000 in 33 of the 40 feature-set by model by
+codec cells, 0.019 in six and 0.038 in one, all of those under GSM. The
+audit's four level statistics sat at 0.55 to 0.66, a weak residual leak by
+its own scale. That number was not a detector result. A code review of the
+pair build found three things the audit did not measure, and measured them
+on an earlier build of the same pipeline that was still on disk:
 
-That run could not say whether the colour confound was closed, because the
-audit computed the tilt and centroid of the quiet frames per clip and then
-never scored them. The 0.569 and 0.574 above were measured once by hand, not
-by the build. The audit now scores both, so the next run will show them next
-to the level statistics. Until it does, an EER of 0.000 on this set should be
-described as a TTS-against-field-recording result with the channel matched on
-level and, as far as one manual measurement goes, on colour. The GSM column
-is the more conservative reading, and the robocall figures below rest on the
-text branch and are not affected by any of this.
+- **Bandwidth.** The real recordings are 8 kHz telephone MP3 whose encoder
+  low-passes just under 3 kHz; the renders were 24 kHz, resampled through a
+  short filter that leaves energy up to 4 kHz. The share of energy above the
+  band separated the classes at AUC 1.000 by itself, and the share below
+  300 Hz at 0.98. Every front end is cepstral over a filterbank that ran to
+  3800 Hz, so they read those bands directly.
+- **Trailing silence.** Renders ended in about a second of digital silence,
+  recordings in a fifth of a second of room tone: AUC 0.86.
+- **DC offset** on the vocoded half of the spoofs: AUC 0.93.
+
+A fourth finding was a bug rather than a confound: the pair build drew spoof
+voices from the whole pool, three of whose five voices cannot read
+Devanagari and return empty audio for it. Sixty-five percent of the renders
+failed silently, which is why 600 requested lines became 211 pairs, and
+every surviving spoof came from two voices. A 64-component GMM had two
+timbres to memorise.
+
+**What changed.** Every anti-spoofing cepstrum is now computed from a
+conditioned signal: DC removed, a brick-wall band-pass to 300 to 2800 Hz
+(the band the recordings actually occupy, with the filter's own transition
+kept where both sides are flat), leading and trailing silence trimmed, and
+dither at -70 dB so an exact zero cannot be told from a near one. The
+filterbank stops at the same edges. This is applied in the one function
+every extractor goes through, so training, evaluation and the live detector
+see the same signal, and a phone call is band-limited anyway. The audit now
+scores ten statistics, measured both on the raw files and after the same
+conditioning, and it is the conditioned table that decides whether the set
+is usable, because that is what the detector sees. On the earlier build the
+raw worst statistic was 0.98 and the conditioned one 0.78. The pair build
+draws Devanagari voices only, prints its failure count, and carries a build
+version that the runner checks, so a set built the old way is rebuilt
+rather than reused.
+
+The equal error rates in `data/results/antispoof_results.json` should be
+read against the audit table next to them. A run whose conditioned worst
+statistic is above 0.75 stops before training, and one that passes is still
+a TTS-against-field-recording measurement with the channel matched as far as
+ten statistics can see. The robocall figures below rest on the text branch
+and are not affected by any of this.
 
 ## 5. Experimental setup
 

@@ -90,8 +90,13 @@ class CepstralConfig:
 
     n_filters: int = 40          # filterbank channels
     n_ceps: int = 20             # cepstral coefficients kept
-    fmin: float = 60.0
-    fmax: float = 3800.0         # telephone band ceiling
+    # The filterbank stops where the conditioning band-pass stops. With
+    # fmin 60 and fmax 3800 the outer filters read only the filter's
+    # roll-off, and on a set whose real half is 8 kHz telephone audio and
+    # whose spoofs were 24 kHz renders, the energy above 3400 Hz alone
+    # separated the classes at AUC 1.000 through exactly those filters.
+    fmin: float = 300.0
+    fmax: float = 2800.0         # same edges as antispoof.features.condition
     lifter: int = 22
     use_energy: bool = True
     deltas: bool = True

@@ -537,6 +537,39 @@ def test_paired_topics_share_their_setup_lines():
                 assert line in benign.get(act, ()), f"{topic}/{act} spine line missing from benign side"
 
 
+def test_no_ordinary_act_belongs_to_one_class():
+    """Every dialogue act a benign call can perform, a scam can too, and the
+    other way round, except the coercive ones. SMALLTALK used to appear in no
+    scam arc, so one chatty turn identified the class."""
+    from swarkavach.corpus.grammar import (
+        COERCIVE_ACTS, MILD_ARCS, SCENARIO_ARCS, TOPIC_PAIRS, TOPIC_SPINE, parse_arc,
+    )
+    from swarkavach.schema import SCAM_SCENARIOS
+
+    reach: dict = {}
+    for scen, arcs in SCENARIO_ARCS.items():
+        cls = "scam" if scen in SCAM_SCENARIOS else "benign"
+        for arc in arcs:
+            for act, _ in parse_arc(arc):
+                reach.setdefault(act, set()).add(cls)
+    for arc in MILD_ARCS:
+        for act, _ in parse_arc(arc):
+            reach.setdefault(act, set()).add("scam")
+    lonely = sorted(a for a, c in reach.items() if len(c) == 1 and a not in COERCIVE_ACTS)
+    assert not lonely, f"acts only one class can perform: {lonely}"
+    for act in COERCIVE_ACTS:
+        assert reach.get(act) == {"scam"}, f"{act} must stay scam-only"
+
+    # and the spine's acts must be reachable on both sides of every pair,
+    # or the shared lines are shared in name only
+    for topic, acts in TOPIC_SPINE.items():
+        for side in ("scam", "benign"):
+            reachable = {a for arc in SCENARIO_ARCS[TOPIC_PAIRS[topic][side]]
+                         for a, _ in parse_arc(arc)}
+            missing = sorted(set(acts) - reachable)
+            assert not missing, f"{topic}/{side}: spine acts no arc reaches: {missing}"
+
+
 def test_neutral_pool_reaches_both_classes():
     """A greeting or a close must be available to a scam and a benign call alike."""
     from swarkavach.corpus.grammar import NEUTRAL_CALLER, _pattern_pool

@@ -162,9 +162,6 @@ def _plan_split(
     offset: int = 0,
 ) -> List[Dict[str, Any]]:
     """Lay out one split so all four cells and every scenario are covered."""
-    n_scam = int(round(n_calls * scam_ratio))
-    n_benign = n_calls - n_scam
-
     # Draw the topic first and the label inside it.
     #
     # This used to pick the scenario from SCAM_SCENARIOS or BENIGN_SCENARIOS
@@ -184,9 +181,13 @@ def _plan_split(
     n_paired = n_calls - n_unpaired
     n_paired_scam = int(round(n_paired * scam_ratio))
 
+    # Every scam draw gets a benign twin on the same topic, so a topic is
+    # never more than one call out of balance however small the split.
+    # Rotating topics and labels on separate cycles left a 24-call split
+    # with a topic at 2 scam to 1 benign.
     for i in range(n_paired):
-        topic = topics[(i + offset) % len(topics)]
-        is_scam = 1 if i < n_paired_scam else 0
+        topic = topics[((i // 2) + offset) % len(topics)]
+        is_scam = i % 2 if i < 2 * min(n_paired_scam, n_paired - n_paired_scam)             else int(n_paired_scam > n_paired - n_paired_scam)
         entries.append({
             "label_scam": is_scam,
             "topic": topic,
@@ -206,7 +207,7 @@ def _plan_split(
         scen = pool[(i + offset) % len(pool)]
         entries.append({
             "label_scam": is_scam,
-            "topic": scen,
+            "topic": grammar.topic_of(scen),
             "scenario": scen,
             "split": split,
         })

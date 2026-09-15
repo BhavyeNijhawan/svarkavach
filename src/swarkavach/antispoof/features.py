@@ -117,6 +117,108 @@ def _clean(x) -> np.ndarray:
     return np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
 
 
+def trim_silence(x: np.ndarray, sr: int, rel_db: float = 40.0,
+                 pad_s: float = 0.1) -> np.ndarray:
+    """Cut leading and trailing quiet.
+
+    A frame is quiet if it sits more than `rel_db` below the loudest frame.
+    `pad_s` of context is kept before the first loud frame, so onsets are
+    not clipped; nothing is kept after the last one, because a trailing pad
+    of any fixed length is itself a difference between a clip that had a
+    silent tail and one that did not. Signals with nothing above the
+    threshold come back untouched.
+    """
+    x = np.asarray(x, dtype=np.float64).ravel()
+    n = int(0.02 * sr)
+    hop = max(n // 2, 1)
+    if x.size < 2 * n:
+        return x
+    n_fr = 1 + (x.size - n) // hop
+    idx = np.arange(n)[None, :] + hop * np.arange(n_fr)[:, None]
+    e = 10.0 * np.log10(np.mean(x[idx] ** 2, axis=1) + 1e-12)
+    loud = np.flatnonzero(e > e.max() - rel_db)
+    if loud.size == 0:
+        return x
+    a = max(int(loud[0]) * hop - int(pad_s * sr), 0)
+    b = min(int(loud[-1]) * hop + n, x.size)
+    return x[a:b] if b - a >= n else x
+
+
+#: The band every anti-spoofing cepstrum is computed from. Measured on the
+#: real Hindi telephone recordings: their MP3 encoder's low-pass starts
+#: just under 3000 Hz (-28 dB by 3200), not at the 3400 Hz of the textbook
+#: telephone band, and below 300 Hz they carry 11 dB less than a neural
+#: render does. The top edge sits at 2800 so the filter's own transition
+#: band lies where both sides are still flat; at 3000 the last hundred
+#: hertz of transition was reading the recordings' roll-off against the
+#: renders' content and separated them at AUC 0.82 on its own.
+#: SETTINGS.cepstral.fmin / fmax are set to the same edges.
+BAND_LOW_HZ = 300.0
+BAND_HIGH_HZ = 2800.0
+
+
+def _brick_wall(x: np.ndarray, sr: int, low: float, high: float,
+                width_hz: float = 100.0, stop_db: float = 60.0) -> np.ndarray:
+    """A steep zero-phase FIR band-pass.
+
+    A Butterworth of any sane order leaves a transition band a few hundred
+    hertz wide, and on this data the spoofs carry 15 dB more than the real
+    recordings right there. Kaiser-windowed FIR with a 100 Hz transition,
+    run forwards and backwards, so the stop band is really stopped.
+    """
+    from scipy import signal as ssig
+
+    x = np.asarray(x, dtype=np.float64).ravel()
+    nyq = sr / 2.0
+    if x.size < 64 or not (0.0 < low < high < nyq):
+        return x
+    beta = 0.1102 * (stop_db - 8.7) if stop_db > 50 else 0.5842 * (stop_db - 21) ** 0.4 + 0.07886 * (stop_db - 21)
+    numtaps = int(np.ceil((stop_db - 8.0) / (2.285 * 2.0 * np.pi * width_hz / sr)))
+    numtaps += 1 - numtaps % 2                     # odd, so the delay is integral
+    numtaps = max(numtaps, 65)
+    if x.size <= 3 * numtaps:
+        return x
+    taps = ssig.firwin(numtaps, [low, min(high, 0.98 * nyq)], pass_zero=False,
+                       window=("kaiser", beta), fs=sr)
+    return ssig.filtfilt(taps, [1.0], x)
+
+
+def condition(x, sr: int = TARGET_SR) -> np.ndarray:
+    """What every anti-spoofing cepstrum is computed from.
+
+    Four things, in this order: remove the DC offset, band-pass to the
+    band the real recordings actually occupy (BAND_LOW_HZ to BAND_HIGH_HZ,
+    brick wall), trim leading and trailing silence, add dither.
+
+    This exists because the real Hindi recordings are 8 kHz telephone audio
+    with nothing above 3.4 kHz, and the spoofs were 24 kHz renders
+    resampled through a short filter that leaves energy up to 4 kHz. The
+    share of energy above 3.4 kHz alone separated the two classes at AUC
+    1.000, the spoofs carried a second of trailing digital silence to the
+    recordings' fifth, and the vocoded half had a DC offset. All three are
+    facts about the pipeline, not the voice, and the level and colour
+    matching in the pair build could not see any of them.
+
+    Applied here, in the one function every extractor goes through, so
+    training, evaluation and the live detector see the same signal. A phone
+    call is band-limited anyway; this only makes the detector honest about
+    it.
+    """
+    x = _clean(x)
+    x = x - float(np.mean(x))
+    x = _brick_wall(x, sr, BAND_LOW_HZ, BAND_HIGH_HZ)
+    x = trim_silence(x, sr)
+    # Dither at -70 dB relative to the signal. An 8 kHz MP3 decodes to
+    # exactly zero above its encoder's low-pass, a resampled render does
+    # not, and with a log floor of 1e-12 the ratio of nothing to almost
+    # nothing was still a perfect classifier after the band-pass. Both
+    # sides now share the same noise floor in the stop bands. Seeded from
+    # the length so the same input always conditions the same way.
+    rms = float(np.sqrt(np.mean(x ** 2))) or 1e-6
+    rng = np.random.default_rng(x.size)
+    return x + rng.standard_normal(x.size) * (rms * 10 ** (-70 / 20))
+
+
 def _speech_index(x: np.ndarray, sr: int, n_frames: int) -> np.ndarray:
     """Indices of the frames the VAD calls speech, or every frame if too few.
 
@@ -172,9 +274,10 @@ def frame_features(
     use_deltas = cep_cfg.deltas if deltas is None else bool(deltas)
     use_cmvn = cep_cfg.cmvn if apply_cmvn is None else bool(apply_cmvn)
 
-    x = _clean(x)
-    # Level normalisation first: a detector that keys on recording gain would
-    # score the same voice differently on two handsets.
+    x = condition(x, sr)
+    # Level normalisation after conditioning: a detector that keys on
+    # recording gain would score the same voice differently on two handsets,
+    # and the gain has to be measured on the band and span the detector reads.
     x = np.asarray(rms_normalize(x.astype(np.float32)), dtype=np.float64)
 
     cfg, cep = _configs(sr)

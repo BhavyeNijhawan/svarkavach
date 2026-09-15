@@ -596,7 +596,7 @@ def build_antispoof_pairs(
         batch = utts[start:start + CHUNK]
         items = []
         for j, u in enumerate(batch):
-            v = N.voice_for_speaker(f"spoof_{(start + j) % 40}", seed)
+            v = N.voice_for_speaker(f"spoof_{(start + j) % 40}", seed, script="deva")
             # GramVaani transcripts are already Devanagari, so no
             # transliteration. They do carry <inaudible> markers though, and
             # the TTS service reads those as SSML tags and stops rendering at
@@ -615,6 +615,18 @@ def build_antispoof_pairs(
                 n_ok += 1
         del rendered
 
+    # Say how many renders failed. This count used to be kept and never
+    # printed, which is how a build that lost 389 of 600 lines passed as a
+    # 211-pair set for a week.
+    failed = len(utts) - n_ok
+    if progress or failed:
+        print(f"  rendered {n_ok} of {len(utts)} lines"
+              + (f", {failed} FAILED (empty audio from the speech service)" if failed else ""),
+              flush=True)
+    if failed > len(utts) // 4:
+        print("  more than a quarter of the lines failed. The set is usable but "
+              "small; check the failure log before trusting it.", flush=True)
+
 
     # Audit before writing, so a leaky set announces itself rather than being
     # discovered three experiments later.
@@ -626,6 +638,7 @@ def build_antispoof_pairs(
     mpath = out_dir / "manifest.json"
     payload = {
         "confound_audit": audit,
+        "pairs_build_version": PAIRS_BUILD_VERSION,
         "n_pairs": n_ok,
         "n_files": len(manifest),
         "sample_rate": sr,
@@ -641,6 +654,26 @@ def build_antispoof_pairs(
     mpath.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
     payload["manifest"] = str(mpath)
     return payload
+
+
+#: Bumped when the pair build changes in a way that makes an existing set
+#: the wrong set: voice selection, channel matching, filtering. The runner
+#: compares this against the manifest and rebuilds pairs, then the models
+#: and results, when they differ. Version 1 is the build that drew from all
+#: five voices and lost 65 percent of its renders to the three that cannot
+#: read Devanagari, leaving every spoof in two voices.
+PAIRS_BUILD_VERSION = 2
+
+#: Every statistic confound_audit scores. A stored audit missing any of these
+#: was written by an older build and is re-derived from the audio on disk.
+AUDIT_STATISTICS: Tuple[str, ...] = (
+    "noise_floor_db", "snr_proxy_db", "zcr_mean", "duration",
+    "quiet_centroid_hz", "quiet_tilt_db",
+    # The three that were never measured and that a review found separating
+    # the classes at AUC 0.98 to 1.000 on the raw pairs: bandwidth above the
+    # telephone band, trailing digital silence, and DC offset.
+    "band_share_hi", "band_share_lo", "trailing_quiet_s", "dc_abs",
+)
 
 
 def confound_audit(manifest_items: Sequence[Dict[str, Any]],
@@ -662,20 +695,12 @@ def confound_audit(manifest_items: Sequence[Dict[str, Any]],
     from .dsp.framing import frame_signal, short_time_energy, zero_crossing_rate
     from .evaluate import roc_auc
 
-    rows: Dict[int, List[Dict[str, float]]] = {0: [], 1: []}
-    for it in manifest_items:
-        try:
-            x, _ = read_audio(it["path"], sr=sr)
-        except Exception:
-            continue
-        if x.size < 4000:
-            continue
+    from .antispoof.features import BAND_HIGH_HZ, BAND_LOW_HZ, condition
+
+    def stats_of(x: np.ndarray) -> Dict[str, float]:
         fr = frame_signal(x, 200, 80, window="hamming")
         e = short_time_energy(fr)
         db = 10.0 * np.log10(np.maximum(e, 1e-12))
-        # Spectral shape of the quiet frames, which is where an injected
-        # noise floor of the wrong colour shows up. Level statistics alone
-        # cannot see it, and they were the only thing this audit measured.
         qs = _quiet_spectrum(x, sr)
         if qs is not None:
             f = np.linspace(0.0, sr / 2.0, qs.size)
@@ -686,14 +711,47 @@ def confound_audit(manifest_items: Sequence[Dict[str, Any]],
             tilt = float(20.0 * np.log10(max(hi, 1e-9) / max(lo, 1e-9)))
         else:
             centroid, tilt = 0.0, 0.0
-        rows[int(it["label"])].append({
+        # bandwidth: share of speech-band energy outside 300 to 3400 Hz
+        spec = np.abs(np.fft.rfft(x * np.hanning(x.size))) ** 2
+        freqs = np.fft.rfftfreq(x.size, 1.0 / sr)
+        total = float(spec.sum()) + 1e-12
+        # trailing quiet: seconds after the last frame within 40 dB of peak
+        loud = np.flatnonzero(db > db.max() - 40.0)
+        trailing = (fr.shape[0] - 1 - int(loud[-1])) * 80 / sr if loud.size else 0.0
+        return {
             "noise_floor_db": float(np.percentile(db, 10)),
             "snr_proxy_db": float(np.percentile(db, 95) - np.percentile(db, 10)),
             "zcr_mean": float(np.mean(zero_crossing_rate(fr))),
             "duration": float(x.size) / sr,
             "quiet_centroid_hz": centroid,
             "quiet_tilt_db": tilt,
-        })
+            # In dB with a floor at -60, because a ratio with no floor tells
+            # a real recording's exact zero from a render's one part in a
+            # billion, and no detector reads below its own dither.
+            "band_share_hi": max(10.0 * np.log10(float(spec[freqs >= BAND_HIGH_HZ].sum()) / total + 1e-12), -60.0),
+            "band_share_lo": max(10.0 * np.log10(float(spec[freqs < BAND_LOW_HZ].sum()) / total + 1e-12), -60.0),
+            "trailing_quiet_s": float(trailing),
+            "dc_abs": float(abs(np.mean(x))),
+        }
+
+    rows: Dict[int, List[Dict[str, float]]] = {0: [], 1: []}
+    rows_raw: Dict[int, List[Dict[str, float]]] = {0: [], 1: []}
+    for it in manifest_items:
+        try:
+            x, _ = read_audio(it["path"], sr=sr)
+        except Exception:
+            continue
+        if x.size < 4000:
+            continue
+        # The audit asks whether a trivial statistic separates the classes AS
+        # THE DETECTOR SEES THEM, so the scored table is measured after the
+        # same conditioning every cepstrum goes through. The raw table is
+        # kept alongside: it says what the set itself carries.
+        rows_raw[int(it["label"])].append(stats_of(x))
+        xc = condition(x, sr)
+        if xc.size < 4000:
+            xc = x
+        rows[int(it["label"])].append(stats_of(np.asarray(xc, dtype=np.float32)))
 
     out: Dict[str, Any] = {"per_statistic": {}, "n_bonafide": len(rows[0]),
                            "n_spoof": len(rows[1])}
@@ -701,31 +759,81 @@ def confound_audit(manifest_items: Sequence[Dict[str, Any]],
         out["status"] = "not enough audio to audit"
         return out
 
-    worst = 0.5
-    # The two colour statistics were computed per clip but never scored, so
-    # the audit could not see the confound the report says it was extended
-    # for. A run then came back with an equal error rate of 0.000 in 33 of 40
-    # cells while the four level statistics sat at 0.55 to 0.66, and there was
-    # no way to tell from the audit whether the spectral shape of the injected
-    # noise still gave the answer away. Now there is.
-    for k in ("noise_floor_db", "snr_proxy_db", "zcr_mean", "duration",
-              "quiet_centroid_hz", "quiet_tilt_db"):
-        a = np.array([r[k] for r in rows[0]])
-        b = np.array([r[k] for r in rows[1]])
-        y = np.array([0] * a.size + [1] * b.size)
-        auc = roc_auc(np.concatenate([a, b]), y)
-        auc = max(auc, 1.0 - auc)      # leakage regardless of direction
-        worst = max(worst, auc)
-        out["per_statistic"][k] = {
-            "bonafide_mean": round(float(a.mean()), 3),
-            "spoof_mean": round(float(b.mean()), 3),
-            "auc_alone": round(float(auc), 4),
-        }
+    def table(rs: Dict[int, List[Dict[str, float]]]) -> Tuple[Dict[str, Any], float]:
+        per: Dict[str, Any] = {}
+        worst = 0.5
+        for k in AUDIT_STATISTICS:
+            a = np.array([r[k] for r in rs[0]])
+            b = np.array([r[k] for r in rs[1]])
+            y = np.array([0] * a.size + [1] * b.size)
+            auc = roc_auc(np.concatenate([a, b]), y)
+            auc = max(auc, 1.0 - auc)      # leakage regardless of direction
+            worst = max(worst, auc)
+            per[k] = {
+                "bonafide_mean": round(float(a.mean()), 4),
+                "spoof_mean": round(float(b.mean()), 4),
+                "auc_alone": round(float(auc), 4),
+            }
+        return per, worst
+
+    out["per_statistic"], worst = table(rows)
+    out["per_statistic_raw"], worst_raw = table(rows_raw)
     out["worst_auc"] = round(float(worst), 4)
+    out["worst_auc_raw"] = round(float(worst_raw), 4)
+    out["measured_on"] = "after telephone-band conditioning (what the detector sees)"
     out["status"] = ("channel leak, do not trust the EER" if worst > 0.75
                      else "weak residual leak" if worst > 0.62
                      else "clean")
     return out
+
+
+def audit_is_current(audit: Optional[Dict[str, Any]]) -> bool:
+    """Does a stored audit score every statistic this code scores?"""
+    per = (audit or {}).get("per_statistic") or {}
+    return all(k in per for k in AUDIT_STATISTICS)
+
+
+def _pair_path(recorded: str, out_dir: Path) -> Path:
+    """The clip's path on this machine, whatever machine wrote the manifest.
+
+    The manifest stores absolute paths. A set restored from Drive into a
+    clone at a different location would otherwise resolve nothing, and
+    `antispoof_pairs_as_calls` would silently drop every item.
+    """
+    p = Path(recorded)
+    if p.exists():
+        return p
+    return out_dir / p.parent.name / p.name
+
+
+def refresh_confound_audit(out_dir: Optional[Path] = None,
+                           force: bool = False) -> Dict[str, Any]:
+    """Re-audit an existing pair set from its audio, without rebuilding it.
+
+    The audit only ran inside the pair build, so a statistic added to it
+    after the pairs were built could not be seen without re-rendering every
+    line through the speech service, which is most of an hour. This reads
+    the WAVs already on disk instead, which is seconds, and writes the new
+    audit back into the manifest. Models and results are untouched: the
+    audit describes the files they were trained on, it does not change them.
+    """
+    out_dir = Path(out_dir or (RAW_DIR / "antispoof_pairs"))
+    man = load_antispoof_pairs(out_dir)
+    if not man:
+        return {}
+    if not force and audit_is_current(man.get("confound_audit")):
+        return man
+    items = [dict(it, path=str(_pair_path(it["path"], out_dir)))
+             for it in (man.get("items") or [])]
+    audit = confound_audit(items, int(man.get("sample_rate", TARGET_SR)))
+    if audit.get("worst_auc") is None:
+        # the audio did not resolve; keep the old audit rather than clobber it
+        return man
+    audit["recomputed_from_disk"] = True
+    man["confound_audit"] = audit
+    (out_dir / "manifest.json").write_text(
+        json.dumps(man, indent=2, ensure_ascii=False), encoding="utf-8")
+    return man
 
 
 def load_antispoof_pairs(out_dir: Optional[Path] = None) -> Dict[str, Any]:

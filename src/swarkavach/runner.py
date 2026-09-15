@@ -29,7 +29,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Sequence
+from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 from . import colab
 
@@ -118,9 +118,16 @@ def check_notebook(declared: Optional[int] = None) -> bool:
 def begin(force: Iterable[str] = ()) -> List[str]:
     """Mount Drive, pull back what is already done, and report the plan."""
     global _DONE, _FORCE
-    _FORCE = [str(f) for f in force]
+    _FORCE = _with_downstream([str(f) for f in force])
 
-    colab.mount()
+    mounted = colab.mount()
+    if colab.in_colab() and not mounted:
+        # Without Drive nothing is restored, every stage looks fresh, and the
+        # session spends 60 to 90 minutes rebuilding what Drive already has.
+        # That is the most expensive mistake this runner can make, so it is
+        # not allowed to happen quietly.
+        raise SystemExit("on Colab but Drive did not mount. Fix the mount and "
+                         "re-run this cell; do not continue without it.")
     colab.restore_all()
 
     _DONE = [s for s in colab.what_can_be_skipped() if s not in _FORCE]
@@ -130,18 +137,19 @@ def begin(force: Iterable[str] = ()) -> List[str]:
     # trained and scored on text the repo no longer produces, and the fixes in
     # the grammar would never reach a result file. Text the models never see
     # is text that was never fixed.
-    stale = _corpus_stale_reason()
-    if stale and "corpus" in _DONE:
-        downstream = [s for s in ("corpus", "train", "evaluate") if s in _DONE]
-        _DONE = [s for s in _DONE if s not in downstream]
-        print()
-        print("!" * 70)
-        print("Drive corpus does not match the grammar in this clone.")
-        print(f"  {stale}")
-        print(f"  rebuilding: {', '.join(downstream)}")
-        print("The speech cache is kept, so lines that did not change are not")
-        print("rendered again.")
-        print("!" * 70)
+    for stage, reason in (("pairs", _pairs_stale_reason()),
+                          ("corpus", _corpus_stale_reason())):
+        if reason and stage in _DONE:
+            downstream = [s for s in (stage, *_DOWNSTREAM[stage]) if s in _DONE]
+            _DONE = [s for s in _DONE if s not in downstream]
+            print()
+            print("!" * 70)
+            print(f"Drive {stage} does not match the code in this clone.")
+            print(f"  {reason}")
+            print(f"  rebuilding: {', '.join(downstream)}")
+            print("The speech cache is kept, so lines that did not change are not")
+            print("rendered again.")
+            print("!" * 70)
 
     print()
     print("already done, will be skipped:", ", ".join(_DONE) if _DONE else
@@ -151,6 +159,49 @@ def begin(force: Iterable[str] = ()) -> List[str]:
     print()
     colab.print_status()
     return list(_DONE)
+
+
+#: What has to be rebuilt when a stage is rebuilt. Forcing "corpus" with the
+#: old models kept gives models trained on text the corpus no longer has, and
+#: forcing "pairs" alone gives a voice branch trained on the old pairs. The
+#: cascade is the same one the grammar-staleness check applies.
+_DOWNSTREAM: Dict[str, Tuple[str, ...]] = {
+    "download": ("pairs", "train", "evaluate"),
+    "pairs": ("train", "evaluate"),
+    "corpus": ("train", "evaluate"),
+    "train": ("evaluate",),
+    "evaluate": (),
+}
+
+
+def _with_downstream(force: List[str]) -> List[str]:
+    out: List[str] = []
+    for stage in force:
+        for s in (stage, *_DOWNSTREAM.get(stage, ())):
+            if s not in out:
+                out.append(s)
+    added = [s for s in out if s not in force]
+    if added:
+        print(f"forcing {', '.join(force)} also rebuilds {', '.join(added)}, "
+              "which depend on it")
+    return out
+
+
+def _pairs_stale_reason() -> Optional[str]:
+    """Why the anti-spoofing pairs on disk cannot be reused, or None."""
+    from .datasets import PAIRS_BUILD_VERSION, load_antispoof_pairs
+
+    m = load_antispoof_pairs()
+    if not m:
+        return None
+    have = m.get("pairs_build_version")
+    if have is None:
+        return ("pairs were built before the build was versioned; that build "
+                "drew spoof voices from a pool that mostly cannot read "
+                "Devanagari, so it lost most of its lines and used two voices")
+    if int(have) != PAIRS_BUILD_VERSION:
+        return f"pairs build version {have} on Drive, {PAIRS_BUILD_VERSION} in the clone"
+    return None
 
 
 def _corpus_stale_reason() -> Optional[str]:
@@ -253,9 +304,63 @@ def train() -> None:
     _rule("Train")
     if _skip("train"):
         print("trained models came back from Drive, skipping training")
+        anchor_report()
         return
     run(f"{PY} -m swarkavach.cli train")
     _save("train")
+    anchor_report()
+
+
+def anchor_report(flat_tol: float = 0.05) -> Optional[Dict[str, str]]:
+    """Print the prosody-intent anchor table with an ok / flat / wrong verdict.
+
+    The verdict is derived here from the stored medians and anchors rather
+    than read from the file, so an anchors file written by an older build,
+    which recorded only a strict human > synthetic boolean, still gets the
+    tolerant reading. The strict rule once printed WRONG WAY for a component
+    that separated the two voice cells by 1.6 percent of its span.
+    """
+    import json
+
+    from . import config
+
+    p = config.MODELS_DIR / "pim_anchors.json"
+    if not p.exists():
+        print("no anchors file, the pipeline has not trained")
+        return None
+    d = json.loads(p.read_text(encoding="utf-8"))
+    anchors = d.get("anchors") or {}
+    medians = d.get("medians") or {}
+    if not anchors or not medians:
+        print(f"anchors file has no medians ({d.get('status')})")
+        return None
+
+    verdict: Dict[str, str] = {}
+    print()
+    print("prosody-intent anchors, per component:")
+    print(f"  {'component':14s} {'human':>8s} {'synthetic':>10s} {'gap/span':>9s}   reading")
+    for k, (lo, hi) in anchors.items():
+        med = medians.get(k) or {}
+        h, sy = med.get("human"), med.get("synthetic")
+        span = float(hi) - float(lo)
+        if h is None or sy is None or span <= 1e-9:
+            verdict[k] = "unknown"
+            print(f"  {k:14s} {'':>8s} {'':>10s} {'n/a':>9s}   unknown")
+            continue
+        gap = (float(h) - float(sy)) / span
+        verdict[k] = "ok" if gap > flat_tol else ("wrong" if gap < -flat_tol else "flat")
+        print(f"  {k:14s} {h:8.4f} {sy:10.4f} {gap:+9.3f}   {verdict[k]}")
+
+    wrong = [k for k, v in verdict.items() if v == "wrong"]
+    flat = [k for k, v in verdict.items() if v == "flat"]
+    if wrong:
+        print(f"  WRONG: {wrong} read clearly higher for synthetic speech than for")
+        print("  human, so they fight the feature and need replacing.")
+    if flat:
+        print(f"  flat: {flat} separate the voice cells by under {flat_tol:.0%} of")
+        print("  their span. Expected on the edge backend, where both cells are")
+        print("  neural voices; person-or-machine is the anti-spoofing branch's job.")
+    return verdict
 
 
 def evaluate(codecs: str = "clean,g711u,g711a,gsm") -> None:
@@ -444,11 +549,16 @@ def _print_one(name: str, d: dict) -> None:
             realc = (d.get("real_codec") or {}).get(c)
             nf = (d.get("n_failed") or {}).get(c, 0)
             tag = "" if realc else "  [numpy stand-in, not the real codec]"
+            audio = ((d.get("auc_by_arm") or {}).get("audio_only") or {}).get(c)
             if auc is None:
                 print(f"  {c:12s} not reported, {nf} calls failed{tag}")
             else:
-                print(f"  {c:12s} AUC {auc:.3f}"
+                print(f"  {c:12s} full AUC {auc:.3f}"
+                      + (f"   audio-only AUC {audio:.3f}" if audio is not None else "")
                       + (f"  [{nf} failed]" if nf else "") + tag)
+        if d.get("auc_by_arm", {}).get("audio_only"):
+            print("  The full arm is carried by text, which no codec touches; read the")
+            print("  audio-only column for what the channel does to the voice branch.")
 
 
 def audit_pairs() -> bool:
@@ -462,10 +572,19 @@ def audit_pairs() -> bool:
     corpus, where both classes are machine generated, and the equal error rate
     stopped meaning what the report says it means.
     """
-    from .datasets import load_antispoof_pairs
+    from .datasets import (audit_is_current, load_antispoof_pairs,
+                           refresh_confound_audit)
 
     _rule("Anti-spoofing set audit")
     m = load_antispoof_pairs()
+    if m and not audit_is_current(m.get("confound_audit")):
+        # The audit used to run only inside the pair build, so a statistic
+        # added afterwards was invisible without re-rendering every line.
+        # The WAVs are on disk; re-reading them is seconds.
+        print("stored audit predates the colour statistics; re-auditing the")
+        print("pair audio already on disk (no rebuild)")
+        m = refresh_confound_audit() or m
+        colab.save("pairs", quiet=True)
     if not m:
         print("NO PAIRS: data/raw/antispoof_pairs/manifest.json does not exist.")
         print("The voice branch would fall back to the generated corpus, where")
