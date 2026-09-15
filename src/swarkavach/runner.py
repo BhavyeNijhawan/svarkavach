@@ -124,6 +124,25 @@ def begin(force: Iterable[str] = ()) -> List[str]:
     colab.restore_all()
 
     _DONE = [s for s in colab.what_can_be_skipped() if s not in _FORCE]
+
+    # A corpus from Drive is only reusable if it was generated from the
+    # templates this clone carries. Otherwise every stage after it would be
+    # trained and scored on text the repo no longer produces, and the fixes in
+    # the grammar would never reach a result file. Text the models never see
+    # is text that was never fixed.
+    stale = _corpus_stale_reason()
+    if stale and "corpus" in _DONE:
+        downstream = [s for s in ("corpus", "train", "evaluate") if s in _DONE]
+        _DONE = [s for s in _DONE if s not in downstream]
+        print()
+        print("!" * 70)
+        print("Drive corpus does not match the grammar in this clone.")
+        print(f"  {stale}")
+        print(f"  rebuilding: {', '.join(downstream)}")
+        print("The speech cache is kept, so lines that did not change are not")
+        print("rendered again.")
+        print("!" * 70)
+
     print()
     print("already done, will be skipped:", ", ".join(_DONE) if _DONE else
           "nothing, this is a fresh run")
@@ -132,6 +151,29 @@ def begin(force: Iterable[str] = ()) -> List[str]:
     print()
     colab.print_status()
     return list(_DONE)
+
+
+def _corpus_stale_reason() -> Optional[str]:
+    """Why the corpus on disk cannot be reused, or None if it can."""
+    import json
+
+    from . import config
+    from .corpus import generator, grammar
+
+    manifest = config.CORPUS_DIR / generator.MANIFEST_NAME
+    if not manifest.exists():
+        return None
+    try:
+        with open(manifest, encoding="utf-8") as fh:
+            recorded = json.load(fh).get("grammar_fingerprint")
+    except (OSError, ValueError) as exc:
+        return f"manifest unreadable ({type(exc).__name__})"
+    current = grammar.grammar_fingerprint()
+    if recorded is None:
+        return "manifest has no grammar fingerprint, it predates the check"
+    if recorded != current:
+        return f"grammar fingerprint {recorded} on Drive, {current} in the clone"
+    return None
 
 
 def _skip(stage: str) -> bool:
@@ -308,6 +350,24 @@ def report() -> None:
             o = ab.get("overall", {}).get(arm, {})
             row += f"{o.get('auc', 0):>8.3f}{o.get('f1', 0):>8.3f}"
             print(row)
+
+        hs = ab.get("hard_subset") or {}
+        print()
+        if hs.get("note"):
+            print(f"hard subset: {hs['note']}")
+        elif hs.get("n"):
+            print(f"HARD SUBSET only: {hs.get('n_scam')} lexically mild scams against "
+                  f"{hs.get('n_benign')} benign calls written to look like scams.")
+            print("The whole-corpus rows above saturate; this is where an arm")
+            print("comparison has room to say anything.")
+            print()
+            print(f"  {'arm':20s} {'AUC':>8s} {'F1':>8s} {'recall':>8s} {'precision':>10s}")
+            for arm in ab.get("arms", []):
+                v = hs.get(arm)
+                if not v:
+                    continue
+                print(f"  {ARM_LABEL.get(arm, arm):20s} {v['auc']:8.3f} {v['f1']:8.3f} "
+                      f"{v['recall']:8.3f} {v['precision']:10.3f}")
 
     for name, title in (("antispoof_results.json", "ANTI-SPOOFING"),
                         ("ner_results.json", "ENTITY RECOGNITION"),

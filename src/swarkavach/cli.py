@@ -343,8 +343,18 @@ def demo(
     skip_existing: bool = typer.Option(True, help="reuse a corpus and models already on disk"),
 ):
     """Generate, train, evaluate and open the console, in one command."""
+    from .runner import _corpus_stale_reason
+
     have_corpus = any(config.CORPUS_CALLS_DIR.glob("*.json")) if config.CORPUS_CALLS_DIR.exists() else False
     have_models = (config.MODELS_DIR / "fusion_full_logreg.joblib").exists()
+
+    # A corpus generated from older templates is not the corpus this code
+    # produces, and models trained on it would never see the current text.
+    stale = _corpus_stale_reason() if have_corpus else None
+    if stale:
+        console.print(f"[yellow]corpus on disk is stale ({stale}), regenerating[/]")
+        have_corpus = False
+        have_models = False
 
     if not (skip_existing and have_corpus):
         gen_corpus(n=n, seed=SETTINGS.pipeline.seed, audio=True, backend="sim")

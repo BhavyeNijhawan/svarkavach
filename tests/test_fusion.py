@@ -257,7 +257,47 @@ def test_streaming_is_ordered_and_bounded():
     print(f"  streamed {len(tl)} turns, risk {tl[0]['risk']:.3f} to {tl[-1]['risk']:.3f}")
 
 
+def test_hard_subset_metrics_scores_only_the_hard_calls():
+    """The ablation's hard subset picks mild scams and hard negatives, and
+    reports every arm on those alone."""
+    from types import SimpleNamespace
+
+    from swarkavach.evaluate import hard_subset_metrics
+
+    def call(label, **meta):
+        return SimpleNamespace(label_scam=label, meta=meta)
+
+    calls = [
+        call(1, mild_scam=True), call(1, mild_scam=True), call(1, mild_scam=True),
+        call(1, mild_scam=True), call(1),                 call(1),
+        call(0, hard_negative=True), call(0, hard_negative=True),
+        call(0, hard_negative=True), call(0, hard_negative=True),
+        call(0), call(0),
+    ]
+    y = np.array([c.label_scam for c in calls])
+    # a text arm that is perfect on easy calls and blind on hard ones, and a
+    # full arm that is right everywhere
+    text = np.array([0.5, 0.5, 0.5, 0.5, 0.9, 0.9, 0.5, 0.5, 0.5, 0.5, 0.1, 0.1])
+    full = np.array([0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1])
+
+    out = hard_subset_metrics(calls, y, {"text_only": text, "full": full}, threshold=0.65)
+    assert out["n"] == 8 and out["n_scam"] == 4 and out["n_benign"] == 4
+    assert out["full"]["auc"] == 1.0 and out["full"]["recall"] == 1.0
+    # ties everywhere: chance
+    assert abs(out["text_only"]["auc"] - 0.5) < 1e-9
+    assert out["text_only"]["recall"] == 0.0
+
+    # too few hard cases, or one class only: a note, not a crash
+    few = hard_subset_metrics(calls[:3] + calls[6:7], y[[0, 1, 2, 6]],
+                              {"full": full[[0, 1, 2, 6]]}, threshold=0.65)
+    assert "note" in few and "full" not in few
+    one_class = hard_subset_metrics(calls[:4] + calls[4:6] * 2, np.ones(8),
+                                    {"full": np.ones(8)}, threshold=0.65)
+    assert "note" in one_class
+
+
 TESTS = [
+    test_hard_subset_metrics_scores_only_the_hard_calls,
     test_syllable_emphasis_var_measures_emphasis,
     test_prosody_measures_are_finite_on_degenerate_input,
     test_pim_is_high_for_flat_delivery_and_low_for_animated,

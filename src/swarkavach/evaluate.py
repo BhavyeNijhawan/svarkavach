@@ -227,6 +227,51 @@ def _write(name: str, obj: Any) -> Path:
     return p
 
 
+def hard_subset_metrics(
+    calls: Sequence[Any],
+    y: np.ndarray,
+    arm_scores: Dict[str, np.ndarray],
+    threshold: float,
+    min_n: int = 8,
+) -> Dict[str, Any]:
+    """Score every arm on the hard subset only.
+
+    The hard subset is the lexically mild scams together with the benign calls
+    written to look like their scam counterpart. The whole-corpus numbers
+    saturate, and not entirely by mistake: some of it was authorship and the
+    generator was fixed for that, but the rest is real. A scam call does
+    threaten and does ask for a code, and a bag of words finds that. Measured
+    on this corpus a bag-of-words model reaches 0.995 on the paired topics and
+    0.972 on this subset, so this is the only place an arm comparison has room
+    to say anything.
+    """
+    def meta(c):
+        return getattr(c, "meta", None) or {}
+
+    idx = [i for i, c in enumerate(calls)
+           if meta(c).get("hard_negative") or meta(c).get("mild_scam")]
+    out: Dict[str, Any] = {"n": len(idx)}
+    y = np.asarray(y)
+    if len(idx) < min_n or len(set(y[idx].tolist())) < 2:
+        out["note"] = (f"too few hard cases to report, need at least {min_n} "
+                       "with both labels present")
+        return out
+    yh = y[idx]
+    for arm, s in arm_scores.items():
+        sh = np.asarray(s)[idx]
+        b = binary_scores(sh, yh, threshold)
+        out[arm] = {
+            "auc": round(roc_auc(sh, yh), 4),
+            "accuracy": round(b["accuracy"], 4),
+            "f1": round(b["f1"], 4),
+            "recall": round(b["recall"], 4),
+            "precision": round(b["precision"], 4),
+        }
+    out["n_scam"] = int(yh.sum())
+    out["n_benign"] = int(len(yh) - yh.sum())
+    return out
+
+
 def run_full_evaluation(
     codecs: Optional[Sequence[str]] = None,
     skip_robustness: bool = False,
@@ -315,8 +360,11 @@ def run_full_evaluation(
             per_cell[cell] = round(float((got == want).mean()), 4)
         det_rate[arm] = per_cell
 
+    hard = hard_subset_metrics(te_calls, yte, arm_scores, threshold)
+
     ablation = {
         "arms": list(arms.keys()), "cells": cells,
+        "hard_subset": hard,
         "detection_rate": det_rate, "overall": overall,
         "n_per_cell": {c: int(sum(1 for x in te_calls if x.cell == c)) for c in cells},
         "threshold": threshold, "split": "test", "n_test": len(te_calls),

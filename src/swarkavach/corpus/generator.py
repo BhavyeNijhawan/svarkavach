@@ -75,6 +75,12 @@ PAUSE_MAX_S = 0.45
 #: calls the text branch is expected to miss.
 MILD_SCAM_RATIO = 0.22
 
+#: Share of calls drawn from scenarios that exist on only one side of the
+#: label. Those calls are identifiable from their subject alone, so they are
+#: training material rather than evidence, and the evaluation grid is mostly
+#: paired topics. Set to 0.0 for a corpus where the subject never leaks.
+UNPAIRED_TOPIC_SHARE = 0.25
+
 MANIFEST_NAME = "manifest.json"
 
 
@@ -159,23 +165,51 @@ def _plan_split(
     n_scam = int(round(n_calls * scam_ratio))
     n_benign = n_calls - n_scam
 
+    # Draw the topic first and the label inside it.
+    #
+    # This used to pick the scenario from SCAM_SCENARIOS or BENIGN_SCENARIOS
+    # according to the label, so scenario determined label exactly. A model
+    # that only identified the subject scored AUC 1.000 by construction, and
+    # text-only stayed at 1.000 with the entire fraud lexicon deleted. Pairing
+    # the topics means the subject says nothing about the class, and a model
+    # has to read what the call asks for.
+    #
+    # UNPAIRED_TOPIC_SHARE of the calls still come from scenarios with no
+    # counterpart. They are realistic and they broaden the training data; they
+    # are just not evidence, because they are identifiable from the subject.
+    topics = sorted(grammar.TOPIC_PAIRS)
     entries: List[Dict[str, Any]] = []
-    for i in range(n_scam):
-        entries.append(
-            {
-                "label_scam": 1,
-                "scenario": SCAM_SCENARIOS[(i + offset) % len(SCAM_SCENARIOS)],
-                "split": split,
-            }
-        )
-    for i in range(n_benign):
-        entries.append(
-            {
-                "label_scam": 0,
-                "scenario": BENIGN_SCENARIOS[(i + offset) % len(BENIGN_SCENARIOS)],
-                "split": split,
-            }
-        )
+
+    n_unpaired = int(round(n_calls * UNPAIRED_TOPIC_SHARE))
+    n_paired = n_calls - n_unpaired
+    n_paired_scam = int(round(n_paired * scam_ratio))
+
+    for i in range(n_paired):
+        topic = topics[(i + offset) % len(topics)]
+        is_scam = 1 if i < n_paired_scam else 0
+        entries.append({
+            "label_scam": is_scam,
+            "topic": topic,
+            "scenario": grammar.TOPIC_PAIRS[topic]["scam" if is_scam else "benign"],
+            "split": split,
+        })
+
+    # the leftovers, from whichever unpaired scenarios match the label
+    unpaired_scam = [s for s in SCAM_SCENARIOS if s in grammar.UNPAIRED_SCENARIOS]
+    unpaired_benign = [s for s in BENIGN_SCENARIOS if s in grammar.UNPAIRED_SCENARIOS]
+    n_un_scam = int(round(n_unpaired * scam_ratio))
+    for i in range(n_unpaired):
+        is_scam = 1 if i < n_un_scam else 0
+        pool = unpaired_scam if is_scam else unpaired_benign
+        if not pool:
+            pool = list(SCAM_SCENARIOS if is_scam else BENIGN_SCENARIOS)
+        scen = pool[(i + offset) % len(pool)]
+        entries.append({
+            "label_scam": is_scam,
+            "topic": scen,
+            "scenario": scen,
+            "split": split,
+        })
 
     # Voice label is drawn independently of the scam label, so the four cells
     # stay balanced instead of correlating with the content.
@@ -294,6 +328,9 @@ def build_call(entry: Dict[str, Any], seed: int, sr: int = TARGET_SR) -> Call:
         and entry["scenario"] in grammar.HARD_NEGATIVE_SCENARIOS
     )
     meta["mild_scam"] = entry["style"] == "mild"
+    # The subject of the call, shared by its scam and benign variants. Lets a
+    # result be broken down by topic, which is where a label leak would show.
+    meta["topic"] = entry.get("topic") or grammar.topic_of(entry["scenario"])
     meta["timing_source"] = "estimated"
 
     return Call(
@@ -475,12 +512,17 @@ def build_manifest(
     return {
         "schema_version": SCHEMA_VERSION,
         "generator": "swarkavach.corpus.generator.generate_corpus",
+        # The runner compares this against the live grammar before it agrees
+        # to reuse a corpus from Drive. Different text means a different
+        # corpus, whatever the file count says.
+        "grammar_fingerprint": grammar.grammar_fingerprint(),
         "params": {
             "n_calls": int(n_calls),
             "seed": int(seed),
             "scam_ratio": DEFAULT_SCAM_RATIO,
             "synthetic_ratio": DEFAULT_SYNTHETIC_RATIO,
             "mild_scam_ratio": MILD_SCAM_RATIO,
+            "unpaired_topic_share": UNPAIRED_TOPIC_SHARE,
             "split_proportions": dict(DEFAULT_SPLIT),
             "n_speakers": N_SPEAKERS,
             "sample_rate": int(sr),

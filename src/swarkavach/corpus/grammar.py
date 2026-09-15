@@ -34,6 +34,28 @@ Three kinds of call shape live here:
    anti-fraud markers from lexicon.BENIGN_MARKERS where a real caller would
    say them.
 
+Two things keep the label from leaking through the text by accident, and both
+were added after text-only scored AUC 1.000 on the test split with the whole
+fraud lexicon deleted:
+
+- Topic pairing. Scenario used to determine label exactly, ten scam subjects
+  and eight benign ones with no overlap, so identifying the subject was
+  identifying the class. TOPIC_PAIRS puts a scam and a benign scenario on
+  the same subject, the planner draws the topic first and the label inside
+  it, and TOPIC_SPINE gives both variants the same words for everything but
+  the ask. The scenarios that have no counterpart are UNPAIRED_SCENARIOS,
+  used for training and kept to a minority of the corpus.
+- A neutral pool. The two classes used to share not one line of phrasing,
+  because `_pattern_pool` takes the first pool that carries an act and the
+  benign pool always did. NEUTRAL_CALLER and NEUTRAL_CALLEE are added for
+  every style, so greetings, closings, acknowledgements and polite
+  instructions come from the same text whichever class the call is. A
+  scammer says thank you for your time. A bank says please verify.
+
+`grammar_fingerprint` hashes all of this. The runner will not reuse a corpus
+whose manifest carries a different fingerprint, because that corpus was
+generated from text this file no longer produces.
+
 Ethics: no real bank names, no real phone numbers, no real UPI handles. Every
 institution, company, hospital and school in the filler tables is invented.
 Regulator and police names (RBI, TRAI, CBI, customs) do appear, because
@@ -43,6 +65,8 @@ part of the shared lexicon.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import random
 import re
 from dataclasses import dataclass, field
@@ -82,6 +106,62 @@ ACT_SPEAKER: Dict[str, str] = {
     "VICTIM_RESIST": "callee",
     "VICTIM_COMPLY": "callee",
 }
+
+# --------------------------------------------------------------------------
+# Topics
+# --------------------------------------------------------------------------
+
+#: topic -> the scam and benign scenario that share its subject matter.
+#:
+#: This exists to stop the topic from predicting the label. With ten scam
+#: scenarios and eight benign ones and no overlap, scenario determined label
+#: exactly, so identifying the subject was identifying the class and text-only
+#: scored AUC 1.000 on the test split with the entire fraud lexicon deleted.
+#:
+#: Every pair here is the same situation with different intent behind it. A
+#: courier really does call about a parcel and really does need a delivery
+#: code; the fraud version wants a banking code instead. A bank really does
+#: call about pending KYC. A relative really does call in trouble. What
+#: separates them is what is requested and how the pressure moves, and that is
+#: what the branches are supposed to be reading.
+TOPIC_PAIRS: Dict[str, Dict[str, str]] = {
+    "parcel": {"scam": "courier_customs", "benign": "delivery_otp"},
+    "bank_kyc": {"scam": "kyc_freeze", "benign": "bank_reminder"},
+    "bank_txn": {"scam": "otp_theft", "benign": "customer_support"},
+    "family": {"scam": "fake_relative", "benign": "family_call"},
+    "offer": {"scam": "loan_approval", "benign": "telemarketing"},
+}
+
+#: Scenarios with no counterpart on the other side of the label.
+#:
+#: They are real and worth generating, but a call drawn from one of them is
+#: identifiable from its subject alone, so they are kept out of the evaluation
+#: grid and used as extra training material only. Writing benign counterparts
+#: for these (a real utility bill reminder, a real telecom KYC call) would let
+#: them join the grid.
+UNPAIRED_SCENARIOS: Tuple[str, ...] = (
+    "digital_arrest",
+    "lottery_prize",
+    "job_offer",
+    "electricity_disconnect",
+    "sim_block",
+    "appointment_reminder",
+    "survey_call",
+    "school_notice",
+)
+
+#: scenario -> topic, for the scenarios that have one.
+SCENARIO_TOPIC: Dict[str, str] = {
+    scen: topic
+    for topic, pair in TOPIC_PAIRS.items()
+    for scen in pair.values()
+}
+
+
+def topic_of(scenario: str) -> str:
+    """The topic a scenario belongs to, or the scenario name when unpaired."""
+    return SCENARIO_TOPIC.get(scenario, scenario)
+
 
 #: Benign scenarios written to look like their scam counterparts. These are the
 #: calls a text-only classifier gets wrong, and the ablation table needs them.
@@ -653,6 +733,94 @@ SHARED_CALLER: Dict[str, Tuple[str, ...]] = {
         "{DEADLINE} process complete karna hoga, warna file band ho jayegi.",
         "Ye {WINDOW} ka window hai, system khud band kar dega uske baad.",
         "{DEADLINE} nahi hua to main kuch nahi kar paunga, ye samajh lijiye.",
+    ),
+}
+
+#: Caller lines that carry no information about whether the call is a scam.
+#:
+#: This exists because the two classes used to share none of their phrasing.
+#: `_pattern_pool` takes the first pool that has the act, so a benign call
+#: with its own GREET never reached the shared GREET, and the corpus ended up
+#: with 43 scam-only and 30 benign-only tokens. Text alone then separated the
+#: test split at AUC 1.000 with every fraud-lexicon word deleted, which is the
+#: proof that it was reading authorship and not intent.
+#:
+#: Everything here is deliberately something either caller would say. A
+#: scammer says thank you for your time. A real bank says please verify. The
+#: politeness of a fraud call is the technique, not a tell.
+NEUTRAL_CALLER: Dict[str, Tuple[str, ...]] = {
+    "GREET": (
+        "{GREET_WORD}, {CUST} se baat ho rahi hai?",
+        "{GREET_WORD}, {CUST}? Do minute mil sakte hain?",
+        "Hello, {CUST} hain? Ek chhoti si baat thi.",
+        "{GREET_WORD} ji, abhi baat kar sakte hain ya baad me call karoon?",
+        "Hello, main disturb to nahi kar {RAHA} hoon?",
+        "{GREET_WORD}, {FILLER}, {CUST} baat kar rahe hain?",
+    ),
+    "CLOSE": (
+        "Bas itna hi tha, thank you for your time.",
+        "Chaliye ji, dhanyavaad, have a good day.",
+        "Thik hai, aur koi help chahiye to bata dijiyega, dhanyavaad.",
+        "Aapka din achha rahe, dhanyavaad.",
+        "Ho gaya ji, aapka time lene ke liye dhanyavaad.",
+        "Chaliye, rakhta hoon phone, thank you.",
+        "Thik hai sir, ho gaya, dhanyavaad.",
+    ),
+    "INSTRUCT": (
+        "Aap ek baar check kar lijiyega, aur kuch nahi karna hai.",
+        "Bas itna kijiye, phir main aage dekh {LETA} hoon.",
+        "Koi confusion ho to helpline pe pooch lijiyega.",
+        "Aap apne paas note kar rakhiyega, kaam aayega.",
+        "Ek baar confirm kar dijiye, main aage process kar {DETA} hoon.",
+    ),
+    "REASSURE": (
+        "Koi jaldi nahi hai, aap aaram se dekh lijiyega.",
+        "Aapki marzi hai, koi zabardasti nahi hai ismein.",
+        "Agar koi doubt ho to aap official website pe check kar lijiye.",
+        "Main hoon na, do minute ka kaam hai bas.",
+        "{FILLER}, tension mat lijiye, main step by step bata {DETA} hoon.",
+        "Aapko kuch pay nahi karna hai, ye sirf record update hai.",
+    ),
+    "INFORM": (
+        "Aapke registered number pe ek message bhi gaya hoga, chahe to dekh lijiye.",
+        "Ye ek routine process hai, har customer ke liye hota hai.",
+        "Hamare system me aapki details hain, bas cross check kar {RAHA} hoon.",
+        "Aapka record pending list me dikh raha hai, isliye call kiya.",
+    ),
+    "SMALLTALK": (
+        "{FILLER}, ek second, line thodi disturb thi.",
+        "Haan ji, sunayi de raha hai ab?",
+        "{FILLER}, network ka issue lag raha tha.",
+    ),
+}
+
+#: Callee lines that carry no information about the class of the call.
+NEUTRAL_CALLEE: Dict[str, Tuple[str, ...]] = {
+    "CONFIRM": (
+        "{ACK}, bol rahe hain.",
+        "{ACK}, boliye.",
+        "{ACK}, thik hai, note kar liya.",
+        "Achha achha, samajh gaya.",
+        "Ji main hi hoon, boliye kya baat hai.",
+        "{ACK}, main dekh {LETA} hoon.",
+    ),
+    "VICTIM_QUESTION": (
+        "Achha, aur kitne baje tak time hai?",
+        "Ye online bhi ho jayega ya jaana padega?",
+        "Ek baat batao, iske liye kuch lekar aana padega?",
+        "Aap kaunse department se bol rahe hain?",
+        "Ye message mujhe likhit me mil jayega?",
+    ),
+    "VICTIM_RESIST": (
+        "Ek minute, main baad me call karta hoon.",
+        "{ACK}, mujhe pehle confirm karna padega.",
+        "Abhi rehne dijiye, mera pehle se hi chal raha hai.",
+        "Nahi ji, filhaal zaroorat nahi hai.",
+    ),
+    "SMALLTALK": (
+        "{ACK}, {EXCUSE}, ek minute.",
+        "Arre haan, boliye boliye.",
+        "{ACK}, sab thik, aap sunao.",
     ),
 }
 
@@ -1296,6 +1464,150 @@ SCENARIO_ARCS["sim_block"] = (
 #: Mild scam arcs. Same scenarios, no threat and no deadline, one small
 #: request that sounds like ordinary paperwork. Lexically these sit inside the
 #: benign cloud, which is the point.
+# --------------------------------------------------------------------------
+# Hard-negative vocabulary and structure
+# --------------------------------------------------------------------------
+
+#: Extra benign lines using the process vocabulary the template audit found
+#: only on the scam side: verify, submit, pending, valid, registered,
+#: transaction, clearance. None of those words belong to fraud. A bank
+#: verifies, a courier has a pending delivery, a school form gets submitted.
+#: Leaving them on one side of the label was a free answer for any
+#: bag-of-words model, and it also made the hard negatives not hard, which is
+#: the only reason they exist.
+#:
+#: What separates these from their scam counterparts is what the call asks
+#: for, not how it is phrased. The courier here wants the delivery code that
+#: was sent for the delivery; the scam wants a banking code, before a deadline
+#: it invented. That is a distinction a model has to learn something to make.
+HARD_NEGATIVE_EXTRA: Dict[str, Dict[str, Tuple[str, ...]]] = {
+    "bank_reminder": {
+        "INFORM": (
+            "Aapke {BANK_ITEM} ka verification pending dikh raha hai, isliye reminder bhej rahe hain.",
+            "Aapke registered number pe ek transaction alert gaya hoga, wahi confirm karna tha.",
+            "Ye record {TIME} tak valid hai, uske baad branch me update karwana padega.",
+        ),
+        "PROBLEM_STATE": (
+            "Aapke {BANK_ITEM} me ek field pending reh gaya hai, aur kuch nahi.",
+            "System me aapka address purana dikh raha hai, isliye flag aaya hai.",
+        ),
+        "INSTRUCT": (
+            "Aap branch ya {BANK_ITEM} se form submit kar dijiyega, dono chalega.",
+            "Aap khud login karke verify kar lijiyega, main koi detail nahi maangunga.",
+        ),
+        "DEADLINE": (
+            "{DEADLINE} update ho jaye to achha hai, warna late fee lag jayegi.",
+            "Aapke paas {WINDOW} hai, uske baad process branch se hi hoga.",
+        ),
+    },
+    "delivery_otp": {
+        "INFORM": (
+            "Aapka parcel out for delivery tha, warehouse pe ek clearance pending thi.",
+            "Delivery system me {WINDOW} me close karni hoti hai, isliye call kiya.",
+        ),
+        "PROBLEM_STATE": (
+            "Address pe flat number nahi likha hai, isliye ruk gaya hoon.",
+        ),
+        "REQUEST_SENSITIVE": (
+            "Delivery ka {OTP_WORD} bata dijiye, warna parcel wapas chala jayega.",
+            "Jaldi bata dijiye {OTP_WORD}, mera next drop bhi pending hai.",
+        ),
+        "INSTRUCT": (
+            "Aap {OTP_WORD} check kijiye, delivery wale message me hoga, banking wale me nahi.",
+        ),
+        "DEADLINE": (
+            "{DEADLINE} nahi mila to parcel warehouse wapas chala jayega.",
+        ),
+    },
+    "customer_support": {
+        "INFORM": (
+            "Aapka complaint pending status me hai, wahi update dene ke liye call kiya.",
+            "Ek transaction fail hua tha, uska reversal process ho gaya hai.",
+        ),
+        "PROBLEM_STATE": (
+            "Aapke last payment ka record hamare system me nahi aaya, isliye check kar {RAHA} hoon.",
+        ),
+        "INSTRUCT": (
+            "Aap app me jaake status verify kar lijiyega, main koi {OTP_WORD} nahi maangunga.",
+            "Complaint number note kar rakhiyega, aage kaam aayega.",
+        ),
+    },
+    "school_notice": {
+        "INFORM": (
+            "Form submit karna pending hai, {DEADLINE} tak jama kar dijiyega.",
+            "Fees ka receipt valid hai, bas record me update karna hai.",
+        ),
+        "DEADLINE": (
+            "{DEADLINE} nahi hua to naam list me nahi aayega, isliye bata rahe hain.",
+        ),
+    },
+    "telemarketing": {
+        "INFORM": (
+            "Aapka number hamare registered database me hai, isliye call kiya.",
+            "Ye offer {WINDOW} ke liye valid hai, uske baad rate badal jayega.",
+        ),
+        "DEADLINE": (
+            "{DEADLINE} decide kar lijiyega, offer window bas itni hi hai.",
+        ),
+    },
+    "appointment_reminder": {
+        "INFORM": (
+            "Aapka slot system me pending confirmation pe hai, isliye call kiya.",
+        ),
+        "INSTRUCT": (
+            "Aane se pehle ek baar confirm kar dijiyega, taki slot valid rahe.",
+        ),
+    },
+}
+
+#: Arcs for the hard negatives that include DEADLINE and PROBLEM_STATE.
+#:
+#: Without these no benign call in the corpus contained either act, so the
+#: dialogue-act sequence alone identified the class and the coercion
+#: trajectory feature had nothing to do. A real bank reminder states a real
+#: problem and names a real deadline. What it does not do is escalate, isolate
+#: or threaten, and those three acts stay scam-only because that is a real
+#: difference rather than an authoring accident.
+HARD_NEGATIVE_ARCS: Dict[str, Tuple[str, ...]] = {
+    "bank_reminder": (
+        "GREET CONFIRM IDENTIFY_SELF PROBLEM_STATE INFORM VICTIM_QUESTION "
+        "INSTRUCT DEADLINE REASSURE CONFIRM CLOSE",
+        "GREET IDENTIFY_SELF CONFIRM PROBLEM_STATE DEADLINE VICTIM_QUESTION "
+        "REASSURE INSTRUCT CONFIRM CLOSE",
+    ),
+    "delivery_otp": (
+        "GREET CONFIRM IDENTIFY_SELF PROBLEM_STATE INFORM DEADLINE "
+        "REQUEST_SENSITIVE VICTIM_COMPLY CLOSE",
+        "GREET IDENTIFY_SELF CONFIRM INFORM VICTIM_QUESTION INSTRUCT "
+        "REQUEST_SENSITIVE VICTIM_COMPLY REASSURE CLOSE",
+    ),
+    "customer_support": (
+        "GREET CONFIRM IDENTIFY_SELF PROBLEM_STATE INFORM VICTIM_QUESTION "
+        "INSTRUCT REASSURE CONFIRM CLOSE",
+    ),
+    "school_notice": (
+        "GREET IDENTIFY_SELF CONFIRM INFORM DEADLINE VICTIM_QUESTION "
+        "INSTRUCT CONFIRM CLOSE",
+    ),
+    "telemarketing": (
+        "GREET CONFIRM IDENTIFY_SELF INFORM DEADLINE VICTIM_RESIST "
+        "REASSURE CLOSE",
+    ),
+}
+
+
+def _install_hard_negatives() -> None:
+    """Merge the extra lines and arcs into the scenario pools."""
+    for scen, acts in HARD_NEGATIVE_EXTRA.items():
+        pool = SCENARIO_ACTS.setdefault(scen, {})
+        for act, lines in acts.items():
+            existing = tuple(pool.get(act, ()))
+            pool[act] = existing + tuple(l for l in lines if l not in existing)
+    for scen, arcs in HARD_NEGATIVE_ARCS.items():
+        existing = tuple(SCENARIO_ARCS.get(scen, ()))
+        SCENARIO_ARCS[scen] = existing + tuple(a for a in arcs if a not in existing)
+
+
 MILD_ARCS: Tuple[str, ...] = (
     "GREET CONFIRM IDENTIFY_SELF INFORM VICTIM_QUESTION REASSURE REQUEST_SENSITIVE VICTIM_COMPLY CLOSE",
     "GREET IDENTIFY_SELF INFORM CONFIRM REQUEST_SENSITIVE VICTIM_QUESTION REASSURE VICTIM_COMPLY CLOSE",
@@ -1641,6 +1953,12 @@ SCENARIO_ARCS["school_notice"] = (
 # --------------------------------------------------------------------------
 
 #: Which callee pool to fall back to for a given call kind.
+#: Acts that only a scam call may perform. A benign call never draws these,
+#: whatever pool happens to carry them.
+COERCIVE_ACTS: frozenset = frozenset({
+    "THREAT", "ISOLATE", "PRESSURE_ESCALATE", "AUTHORITY_ASSERT",
+})
+
 _CALLEE_POOLS = {
     "hard": (SHARED_CALLEE,),
     "mild": (MILD_SCAM, SHARED_CALLEE),
@@ -1739,8 +2057,25 @@ def _pattern_pool(scenario: str, act: str, speaker: str, style: str) -> List[Tup
     pools = _CALLEE_POOLS[style] if speaker == "callee" else _CALLER_POOLS[style]
     for pool in pools:
         if act in pool:
+            # BENIGN_CALLER has no coercive acts, and the fallthrough here
+            # used to reach SHARED_CALLER's ISOLATE and PRESSURE lines for a
+            # benign call. No benign arc asks for those acts, so it never
+            # fired, but the invariant is the docstring's and it is cheap to
+            # keep it true rather than lucky.
+            if style == "flat" and act in COERCIVE_ACTS:
+                break
             add("shared", pool[act])
             break
+
+    # The neutral pool is ADDED rather than competing, for every style. The
+    # "first pool wins" rule above is right for pressure lines and suspicious
+    # victim lines, which genuinely belong to one class. It was wrong for
+    # greetings, closings, acknowledgements and polite instructions: it meant
+    # the two classes shared not one line of phrasing, and a bag-of-words
+    # model separated them on authorship alone.
+    neutral = NEUTRAL_CALLEE if speaker == "callee" else NEUTRAL_CALLER
+    if act in neutral:
+        add("neutral", neutral[act])
     return out
 
 
@@ -2006,6 +2341,168 @@ def _demo(scenario: str, style: str, seed: int = 3) -> None:
         ]
         marker = "  <" + ", ".join(f"{t}:{b}" for t, b in ents) + ">" if ents else ""
         print(f"  [{d.speaker:6s}] {d.act:18s} {d.text}{marker}")
+
+
+# Applied here, at the bottom, and not next to the definitions above. The
+# scenario pools are assigned statement by statement further down the module,
+# so calling this any earlier merges into dictionaries that are then
+# overwritten by those assignments. It ran at the definition site first and
+# had no effect at all.
+_install_hard_negatives()
+
+# --------------------------------------------------------------------------
+# Per-topic shared setup
+# --------------------------------------------------------------------------
+
+#: topic -> act -> lines used by BOTH the scam and the benign variant.
+#:
+#: Pairing the topics was not enough on its own. The two variants of a topic
+#: were still separate template pools describing the same situation in
+#: different words, so a bag-of-words model read the scenario vocabulary
+#: instead of the subject and stayed at 0.9975.
+#:
+#: Here the setup is identical and only the ask differs. A courier calling
+#: about a parcel says the same things whether or not the courier is real.
+#: What separates them is REQUEST_SENSITIVE, THREAT, ISOLATE and
+#: PRESSURE_ESCALATE, and those are left to the scenario pools.
+TOPIC_SPINE: Dict[str, Dict[str, Tuple[str, ...]]] = {
+    "parcel": {
+        "IDENTIFY_SELF": (
+            "Main {COMPANY} se {NAME} bol {RAHA} hoon, delivery ke baare me.",
+            "{NAME} bol {RAHA} hoon {COMPANY} se, aapka parcel {ORDER_ID} hai.",
+            "Ji main {COMPANY} ka executive bol {RAHA} hoon, order {ORDER_ID} ke liye.",
+        ),
+        "INFORM": (
+            "Aapka order {ORDER_ID} hai, aapke naam pe, address bhi wahi hai.",
+            "Parcel out for delivery tha, ek step pending reh gaya hai.",
+            "System me delivery {WINDOW} me close karni hoti hai, isliye call kiya.",
+        ),
+        "PROBLEM_STATE": (
+            "Parcel pe ek detail match nahi kar rahi, isliye ruka hua hai.",
+            "Hamare system me ye order pending status me dikh raha hai.",
+        ),
+    },
+    "bank_kyc": {
+        "IDENTIFY_SELF": (
+            "Main {BANK} ke {DEPT} se {NAME} bol {RAHA} hoon.",
+            "{NAME} bol {RAHA} hoon {BANK} se, aapke {BANK_ITEM} ke baare me.",
+            "Ji mera naam {NAME} hai, {BANK} se call kar {RAHA} hoon.",
+        ),
+        "INFORM": (
+            "Aapke {BANK_ITEM} ka verification pending dikh raha hai, wahi batana tha.",
+            "Aapke {BANK_ITEM} ka record hamare paas hai, ek step reh gaya hai.",
+            "Ye process har customer ke liye ho raha hai, aap akele nahi hain.",
+        ),
+        "PROBLEM_STATE": (
+            "Aapke {BANK_ITEM} me ek field pending reh gaya hai.",
+            "System me aapka address purana dikh raha hai, isliye flag aaya hai.",
+        ),
+    },
+    "bank_txn": {
+        "IDENTIFY_SELF": (
+            "Main {BANK} ke {DEPT} se {NAME} bol {RAHA} hoon, transaction ke baare me.",
+            "{NAME} bol {RAHA} hoon {BANK} se, aapke {BANK_ITEM} pe ek alert aaya hai.",
+            "Ji {BANK} customer care se {NAME}, ek transaction ke liye call kiya hai.",
+        ),
+        "INFORM": (
+            "Aapke {BANK_ITEM} pe ek transaction attempt hua hai, wahi confirm karna tha.",
+            "Reversal ke liye system ek code bhejta hai, wo registered number pe hi aayega.",
+            "Ek transaction fail hua tha, uska record dekh {RAHA} hoon.",
+        ),
+        "PROBLEM_STATE": (
+            "Aapke last payment ka record system me nahi aaya, isliye check kar {RAHA} hoon.",
+            "Ek transaction pending status me atka hua hai.",
+        ),
+    },
+    "family": {
+        "IDENTIFY_SELF": (
+            "{GREET_WORD}, main bol {RAHA} hoon, pehchana nahi?",
+            "Arre main hoon, {NAME}, awaaz badli hui lag rahi hai na.",
+            "Main {NAME}, aapke ghar se hi baat kar {RAHA} hoon.",
+        ),
+        "INFORM": (
+            "Ek zaroori baat batani thi, isliye is number se call kiya.",
+            "Mera phone kharab ho gaya tha, isliye doosre number se kar {RAHA} hoon.",
+            "Sab thik hai, bas ek kaam tha, wahi batane ke liye call kiya.",
+        ),
+        "PROBLEM_STATE": (
+            "Thodi dikkat ho gayi hai, isliye turant call karna pada.",
+            "Ek problem aa gayi hai, ghar pe abhi kisi ko mat batana.",
+        ),
+    },
+    "offer": {
+        "IDENTIFY_SELF": (
+            "Main {COMPANY} se {NAME} bol {RAHA} hoon, ek offer ke baare me.",
+            "{NAME} bol {RAHA} hoon {COMPANY} se, aapke number pe offer aaya hai.",
+            "Ji {COMPANY} ki team se {NAME}, do minute lunga bas.",
+        ),
+        "INFORM": (
+            "Aapka number hamare registered database me hai, isliye call kiya.",
+            "Ye offer {WINDOW} ke liye valid hai, uske baad rate badal jayega.",
+            "Aapka profile pre approved category me aa raha hai.",
+        ),
+        "PROBLEM_STATE": (
+            "Aapki file me ek document pending hai, isliye process ruka hua hai.",
+            "System me application incomplete dikh rahi hai.",
+        ),
+    },
+}
+
+
+def _install_topic_spine() -> None:
+    """Put the shared setup in front of both variants of every paired topic.
+
+    Prepended rather than appended, so the shared lines are what the sampler
+    reaches first and the scenario's own wording becomes the variation rather
+    than the rule.
+    """
+    for topic, acts in TOPIC_SPINE.items():
+        for side in ("scam", "benign"):
+            scen = TOPIC_PAIRS[topic][side]
+            pool = SCENARIO_ACTS.setdefault(scen, {})
+            for act, lines in acts.items():
+                existing = tuple(pool.get(act, ()))
+                pool[act] = tuple(l for l in lines if l not in existing) + existing
+
+
+_install_topic_spine()
+
+
+
+
+def grammar_fingerprint() -> str:
+    """A hash of every template, arc and topic pairing in this module.
+
+    Stored in the corpus manifest. A corpus that came back from Drive with a
+    different fingerprint was generated from different text, and reusing it
+    would mean the templates in this file never reach a single model. That
+    happened: a session of fixes to the phrasing here was invisible in the
+    results because the Drive corpus predated all of it and every stage
+    skipped itself.
+
+    Semantic rather than a file hash, so editing a comment does not force an
+    hour of regeneration and editing a template does.
+    """
+    payload = {
+        "scenario_acts": {k: {a: list(v) for a, v in sorted(acts.items())}
+                          for k, acts in sorted(SCENARIO_ACTS.items())},
+        "scenario_arcs": {k: list(v) for k, v in sorted(SCENARIO_ARCS.items())},
+        "pools": {
+            name: {a: list(v) for a, v in sorted(pool.items())}
+            for name, pool in (
+                ("shared_caller", SHARED_CALLER), ("shared_callee", SHARED_CALLEE),
+                ("neutral_caller", NEUTRAL_CALLER), ("neutral_callee", NEUTRAL_CALLEE),
+                ("benign_caller", BENIGN_CALLER), ("benign_callee", BENIGN_CALLEE),
+                ("mild_scam", MILD_SCAM),
+            )
+        },
+        "mild_arcs": list(MILD_ARCS),
+        "topic_pairs": {k: dict(v) for k, v in sorted(TOPIC_PAIRS.items())},
+        "unpaired": list(UNPAIRED_SCENARIOS),
+        "slots": {k: list(v.options) for k, v in sorted(SLOTS.items())},
+    }
+    blob = json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")
+    return hashlib.sha256(blob).hexdigest()[:16]
 
 
 if __name__ == "__main__":

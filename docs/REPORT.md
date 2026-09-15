@@ -241,6 +241,27 @@ notice with a due date. Scam scenarios include a mild style that asks one
 innocuous-sounding verification question, which the text branch is expected to
 miss and the voice branch is expected to catch.
 
+Two design rules keep the label from leaking through the text. Both were added
+after a check found text-only at AUC 1.000 on the test split with every word
+of the fraud lexicon deleted, which meant it was reading authorship rather
+than intent. First, topics are paired: the corpus used to have ten scam
+subjects and eight benign ones with no overlap, so the subject of a call gave
+away its class. Five subjects (a parcel, a bank KYC call, a bank transaction
+call, a relative in trouble, a financial offer) now have a scam and a benign
+scenario each, the planner draws the subject first and the label inside it,
+and both variants share one set of lines for everything except what they ask
+for. Second, greetings, closings, acknowledgements and polite instructions
+come from one neutral pool used by both classes, because the two classes
+previously shared not a single line of phrasing. The scenarios without a
+counterpart (lottery, digital arrest, job offer and the like) stay in the
+corpus as a minority used for training; they are realistic, but a call from
+one of them is identifiable from its subject alone.
+
+The grammar carries a fingerprint of every template, arc and pairing, and the
+corpus manifest records it. A run refuses to reuse a corpus from Drive whose
+fingerprint differs from the checked-out grammar, so a change to the text
+always reaches the models.
+
 Audio comes from a source-filter synthesiser: a glottal pulse train through
 formant resonators. The human setting adds cycle-to-cycle pitch jitter,
 amplitude shimmer, breath noise and slow pitch drift; the synthetic setting
@@ -354,7 +375,13 @@ order of what they settle:
    cell rather than as a single aggregate, because a single number hides
    exactly the failure mode that matters: audio-only should fail on human
    scams, text-only should fail on mild scams and on cloned benign calls, and
-   the full arm should clear both.
+   the full arm should clear both. The same file reports every arm on the
+   hard subset alone, the mild scams against the hard negatives. Read that
+   block first. The whole-corpus rows saturate, and only part of that was an
+   artefact: a scam call really does threaten and really does ask for a code,
+   and a bag of words finds that. On this corpus a plain bag-of-words model
+   reaches 0.995 on the paired subjects and 0.972 on the hard subset, so the
+   hard subset is the only place an arm comparison has room to say anything.
 2. **Anti-spoofing** (`antispoof_results.json`). Five feature sets by two
    classical models by channel condition, with DET curves.
 3. **Entity recognition** (`ner_results.json`). CRF against BiLSTM, gold

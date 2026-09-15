@@ -488,6 +488,161 @@ def test_voices_are_stable_and_speaker_specific():
 
 
 # --------------------------------------------------------------------------
+# Topic pairing and the neutral pool
+#
+# These exist because text-only scored AUC 1.000 on the test split with the
+# whole fraud lexicon deleted. Scenario determined label exactly, and the two
+# classes shared no phrasing at all. Both are checked here so they cannot
+# quietly come back.
+# --------------------------------------------------------------------------
+
+
+def test_every_topic_pair_has_one_scenario_per_class():
+    from swarkavach.corpus.grammar import TOPIC_PAIRS
+    from swarkavach.schema import BENIGN_SCENARIOS, SCAM_SCENARIOS
+
+    for topic, pair in TOPIC_PAIRS.items():
+        assert pair["scam"] in SCAM_SCENARIOS, f"{topic}: {pair['scam']} is not a scam scenario"
+        assert pair["benign"] in BENIGN_SCENARIOS, f"{topic}: {pair['benign']} is not benign"
+
+
+def test_label_is_balanced_within_every_paired_topic():
+    """The subject of a call must say nothing about its label."""
+    from swarkavach.corpus.generator import plan_corpus
+    from swarkavach.corpus.grammar import TOPIC_PAIRS, topic_of
+
+    paired = {v for pair in TOPIC_PAIRS.values() for v in pair.values()}
+    entries, _ = plan_corpus(n_calls=300, seed=3)
+    by_topic: dict = {}
+    for e in entries:
+        if e["scenario"] in paired:
+            by_topic.setdefault(topic_of(e["scenario"]), [0, 0])[e["label_scam"]] += 1
+    assert set(by_topic) == set(TOPIC_PAIRS), "every paired topic must be planned"
+    for topic, (n_benign, n_scam) in by_topic.items():
+        assert n_benign > 0 and n_scam > 0, f"{topic} has only one class"
+        share = n_scam / (n_benign + n_scam)
+        assert 0.35 <= share <= 0.65, f"{topic} is {share:.0%} scam, that is a leak"
+
+
+def test_paired_topics_share_their_setup_lines():
+    """Both variants of a topic describe the situation in the same words."""
+    from swarkavach.corpus.grammar import SCENARIO_ACTS, TOPIC_PAIRS, TOPIC_SPINE
+
+    for topic, acts in TOPIC_SPINE.items():
+        scam = SCENARIO_ACTS[TOPIC_PAIRS[topic]["scam"]]
+        benign = SCENARIO_ACTS[TOPIC_PAIRS[topic]["benign"]]
+        for act, lines in acts.items():
+            for line in lines:
+                assert line in scam.get(act, ()), f"{topic}/{act} spine line missing from scam side"
+                assert line in benign.get(act, ()), f"{topic}/{act} spine line missing from benign side"
+
+
+def test_neutral_pool_reaches_both_classes():
+    """A greeting or a close must be available to a scam and a benign call alike."""
+    from swarkavach.corpus.grammar import NEUTRAL_CALLER, _pattern_pool
+
+    for act in ("GREET", "CLOSE"):
+        scam = {p for _, p in _pattern_pool("kyc_freeze", act, "caller", "hard")}
+        benign = {p for _, p in _pattern_pool("bank_reminder", act, "caller", "flat")}
+        for line in NEUTRAL_CALLER[act]:
+            assert line in scam, f"{act}: neutral line not offered to a hard scam"
+            assert line in benign, f"{act}: neutral line not offered to a benign call"
+
+
+def test_hard_negatives_carry_deadline_and_problem_state():
+    """A real bank reminder names a real deadline. Only scams used to."""
+    from swarkavach.corpus.grammar import SCENARIO_ACTS, SCENARIO_ARCS
+
+    for scen in ("bank_reminder", "delivery_otp"):
+        acts = SCENARIO_ACTS[scen]
+        assert "DEADLINE" in acts and acts["DEADLINE"], f"{scen} has no DEADLINE lines"
+        assert "PROBLEM_STATE" in acts and acts["PROBLEM_STATE"], f"{scen} has no PROBLEM_STATE lines"
+        assert any("DEADLINE" in arc for arc in SCENARIO_ARCS[scen]), f"{scen}: no arc reaches DEADLINE"
+
+
+def test_pressure_acts_stay_scam_only():
+    """The neutral pool must not hand a benign call the coercive lines."""
+    from swarkavach.corpus.grammar import _pattern_pool
+    from swarkavach.schema import BENIGN_SCENARIOS
+
+    for scen in BENIGN_SCENARIOS:
+        for act in ("THREAT", "ISOLATE", "PRESSURE_ESCALATE", "AUTHORITY_ASSERT"):
+            got = _pattern_pool(scen, act, "caller", "flat")
+            assert not got, f"{scen} can draw {act}: {got[0][1]!r}"
+
+
+# --------------------------------------------------------------------------
+# Grammar fingerprint
+#
+# A corpus that came back from Drive is only reusable if it was generated
+# from the templates this clone carries. A whole session of template fixes
+# once never reached a result because the Drive corpus predated them and
+# every stage skipped itself.
+# --------------------------------------------------------------------------
+
+
+def test_grammar_fingerprint_is_stable_and_sensitive():
+    from swarkavach.corpus import grammar
+
+    a = grammar.grammar_fingerprint()
+    b = grammar.grammar_fingerprint()
+    assert a == b and len(a) == 16
+
+    pool = grammar.SCENARIO_ACTS["kyc_freeze"]["INFORM"]
+    grammar.SCENARIO_ACTS["kyc_freeze"]["INFORM"] = pool + ("Ek naya line.",)
+    try:
+        assert grammar.grammar_fingerprint() != a, "a template change must change the fingerprint"
+    finally:
+        grammar.SCENARIO_ACTS["kyc_freeze"]["INFORM"] = pool
+    assert grammar.grammar_fingerprint() == a
+
+
+def test_manifest_records_the_fingerprint_and_runner_trusts_it():
+    from swarkavach import config
+    from swarkavach.corpus import generator, grammar
+    from swarkavach.runner import _corpus_stale_reason
+
+    tmp = Path(tempfile.mkdtemp())
+    try:
+        old = config.CORPUS_DIR
+        config.CORPUS_DIR = tmp
+        manifest = tmp / generator.MANIFEST_NAME
+
+        # no manifest at all: nothing to be stale about
+        assert _corpus_stale_reason() is None
+
+        # a manifest from before the check
+        manifest.write_text(json.dumps({"schema_version": 1}), encoding="utf-8")
+        assert "predates" in (_corpus_stale_reason() or "")
+
+        # a matching one
+        manifest.write_text(json.dumps({"grammar_fingerprint": grammar.grammar_fingerprint()}),
+                            encoding="utf-8")
+        assert _corpus_stale_reason() is None
+
+        # a different one
+        manifest.write_text(json.dumps({"grammar_fingerprint": "0000000000000000"}),
+                            encoding="utf-8")
+        reason = _corpus_stale_reason() or ""
+        assert "0000000000000000" in reason and grammar.grammar_fingerprint() in reason
+    finally:
+        config.CORPUS_DIR = old
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_generated_manifest_carries_current_fingerprint():
+    from swarkavach.corpus import grammar
+    from swarkavach.corpus.generator import build_manifest, generate_corpus
+
+    calls = generate_corpus(n_calls=24, seed=5, audio=False, write=False)
+    split = {c.speaker_id: c.split for c in calls}
+    m = build_manifest(calls, split, seed=5, n_calls=24, audio=False,
+                       audio_backend="sim", sr=16000)
+    assert m["grammar_fingerprint"] == grammar.grammar_fingerprint()
+    assert "unpaired_topic_share" in m["params"]
+
+
+# --------------------------------------------------------------------------
 # Runner
 # --------------------------------------------------------------------------
 
