@@ -34,7 +34,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 
 from ..audioio import concat_with_gaps, read_audio, rms_normalize, write_wav
-from ..config import CORPUS_AUDIO_DIR, SETTINGS, TARGET_SR
+from ..config import CORPUS_AUDIO_DIR, CORPUS_DIR, SETTINGS, TARGET_SR
 from ..schema import COERCION_RANK, Call
 from .synth import SYNTHETIC_OVERRIDES, make_voice, synthesize_turn, voice_summary
 
@@ -336,7 +336,16 @@ def render_call_audio(
             Path(CORPUS_AUDIO_DIR) / f"{call.call_id}.wav"
         )
         write_wav(path, signal, sr)
-        call.audio_path = str(path)
+        # Relative to the corpus directory when the file lives under it. An
+        # absolute path is only ever right on the machine that wrote it: a
+        # corpus rendered on Colab carried /content/svk_repo/... in every
+        # call, and on the laptop the console loaded all 480 calls, found no
+        # audio for any of them, and ran the voice branch on nothing without
+        # saying so.
+        try:
+            call.audio_path = str(Path(path).resolve().relative_to(Path(CORPUS_DIR).resolve()))
+        except ValueError:
+            call.audio_path = str(path)
         call.sample_rate = int(sr)
         call.audio_source = backend
         call.meta["timing_source"] = "audio"

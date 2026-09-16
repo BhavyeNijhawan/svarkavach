@@ -581,17 +581,36 @@ def load_corpus(
         call = Call.load(str(path))
         if split is not None and call.split != split:
             continue
-        if with_audio:
-            if not call.audio_path:
+        if call.audio_path:
+            resolved = resolve_audio_path(call.audio_path, corpus_dir)
+            # Always rewritten, not only when with_audio is set: the console
+            # loads every call and reads the audio later, and a path that
+            # only resolved on the machine that rendered it left the voice
+            # branch scoring nothing, silently.
+            call.audio_path = str(resolved) if resolved else call.audio_path
+            if with_audio and resolved is None:
                 continue
-            audio_path = Path(call.audio_path)
-            if not audio_path.is_absolute():
-                audio_path = corpus_dir / audio_path
-            if not audio_path.exists():
-                continue
-            call.audio_path = str(audio_path)
+        elif with_audio:
+            continue
         out.append(call)
     return out
+
+
+def resolve_audio_path(recorded: str, corpus_dir: Optional[Path] = None) -> Optional[Path]:
+    """The WAV for a call on this machine, or None if it is not here.
+
+    Tries the path as recorded, then relative to the corpus directory, then
+    the file name under the corpus audio directory. The last is what saves a
+    corpus rendered elsewhere: the calls carry the renderer's absolute path.
+    """
+    corpus_dir = Path(corpus_dir or CORPUS_DIR)
+    p = Path(recorded)
+    candidates = [p] if p.is_absolute() else []
+    candidates += [corpus_dir / p, corpus_dir / "audio" / p.name]
+    for c in candidates:
+        if c.exists():
+            return c
+    return None
 
 
 def load_manifest(corpus_dir: Optional[Path] = None) -> Dict[str, Any]:

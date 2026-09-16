@@ -675,6 +675,29 @@ def test_generated_manifest_carries_current_fingerprint():
     assert "unpaired_topic_share" in m["params"]
 
 
+def test_corpus_audio_resolves_on_another_machine():
+    """A call rendered elsewhere carries the renderer's absolute path. On the
+    console machine it must still find its WAV, or the voice branch scores
+    nothing without saying so."""
+    from swarkavach.corpus.generator import resolve_audio_path
+
+    tmp = Path(tempfile.mkdtemp())
+    try:
+        (tmp / "audio").mkdir()
+        wav = tmp / "audio" / "call_0007.wav"
+        wav.write_bytes(b"RIFF")
+        # the path some other machine wrote
+        assert resolve_audio_path("/content/svk_repo/data/corpus/audio/call_0007.wav", tmp) == wav
+        # a relative path, as the generator now writes
+        assert resolve_audio_path("audio/call_0007.wav", tmp) == wav
+        # an absolute path that is right here
+        assert resolve_audio_path(str(wav), tmp) == wav
+        # and one that is nowhere
+        assert resolve_audio_path("/content/svk_repo/data/corpus/audio/call_9999.wav", tmp) is None
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 # --------------------------------------------------------------------------
 # Runner
 # --------------------------------------------------------------------------
