@@ -12,7 +12,7 @@ PROPOSED METHODOLOGY
 
 **1. Overview**
 
-The system, called SwarKavach, treats a phone call as a stream of turns. After each turn spoken by the caller, four branches read the call so far and a fusion layer combines them into one risk probability. The four branches are: a voice branch that decides whether the caller's voice is synthetic, a text branch that tags fraud entities and scores scam intent from the transcript, a structure branch that reads the order of dialogue acts as a coercion ramp, and a cross modal branch that measures whether the delivery matches the content. The output after every caller turn is a probability, a band (low, elevated, high, critical), the entity spans found so far, and a list of reasons. An alert is raised when the probability first crosses 0.65.
+The system, called SwarKavach, treats a phone call as a stream of turns. After each turn spoken by the caller, four branches read the call so far and a fusion layer combines them into one risk probability. The four branches are: a voice branch that decides whether the caller's voice is synthetic, a text branch that transcribes the call and tags fraud entities and scores scam intent, a structure branch that reads the order of dialogue acts as a coercion ramp, and a cross modal branch that measures whether the delivery matches the content. The output after every caller turn is a probability, a band (low, elevated, high, critical), and an evidence panel: the entity spans found so far, the phrases that raised intent, the voice cues, and the coercion step reached. An alert is raised when the probability first crosses 0.65.
 
 ![](figures/fig1.png)
 
@@ -48,17 +48,21 @@ Every cepstral computation in the voice branch begins with one conditioning func
 
 **4. Voice Branch**
 
-Five cepstral front ends are implemented and compared: LFCC, MFCC, GFCC, CQCC and LPCC. Each uses 40 filters between 300 and 2800 Hz and keeps 20 coefficients, with first and second differences appended and cepstral mean and variance normalisation applied per utterance, which removes the additive effect of a fixed channel. Two back ends score an utterance. A pair of Gaussian mixture models, one fitted to bona fide frames and one to spoofed frames with up to 64 components each, gives the mean frame log likelihood ratio. A histogram gradient boosted classifier (220 iterations, learning rate 0.07, depth 4) reads 480 utterance level statistics: the mean, standard deviation, skew and kurtosis of each coefficient and its deltas.
+Five cepstral front ends are implemented and compared: LFCC, MFCC, GFCC, CQCC and LPCC. Each uses 40 filters between 300 and 2800 Hz and keeps 20 coefficients, with first and second differences appended and cepstral mean and variance normalisation applied per utterance, which removes the additive effect of a fixed channel. Three back ends score an utterance behind one interface, preferred in the order end to end, boosted, mixture. A RawNet style network reads the conditioned waveform through a SincConv layer of 20 band pass filters with learned cut offs, residual blocks and a gated recurrent unit, so that it does not commit to any hand crafted front end. A histogram gradient boosted classifier (220 iterations, learning rate 0.07, depth 4) reads 480 utterance level statistics: the mean, standard deviation, skew and kurtosis of each coefficient and its deltas. A pair of Gaussian mixture models, one fitted to bona fide frames and one to spoofed frames with up to 64 components each, gives the mean frame log likelihood ratio.
 
-Alongside the detector score, the branch computes pitch jitter, amplitude shimmer, harmonic to noise ratio and spectral flatness variance on the raw signal, and a speaker embedding consistency score that asks whether the caller's turns all come from one voice. Eight numbers leave this branch.
+Alongside the detector score, the branch computes pitch jitter, amplitude shimmer, harmonic to noise ratio and spectral flatness variance on the raw signal. A small TDNN speaker embedder scores each segment of the caller's audio, and the cosine similarity between segments becomes a speaker consistency feature: a real person drifts a little between segments, a single synthetic voice does not drift at all, and a spliced call with two voices drifts a lot, so the feature is informative at both ends. Eight numbers leave this branch.
 
 **5. Text Branch**
 
-**5.1 Fraud entity tagging**
+**5.1 Transcription**
 
-A linear chain conditional random field, implemented in the project rather than taken from a library, tags seven entity types in BIO form: OTP, BANK_ENTITY, AUTHORITY_CLAIM, THREAT_DEADLINE, PAYMENT_HANDLE, PERSONAL_INFO_REQ and MONEY_AMOUNT. Its features are the token, its shape, prefixes and suffixes, the neighbouring tokens, and the token's language tag. It is trained with L2 regularisation 0.5 for 200 iterations on the train split. Entity counts per type, divided by the number of turns so far, become six density features.
+Whisper small, the multilingual model with the language set to Hindi, converts the caller audio to text on the CPU with half precision off. Its segments are aligned to turns by the turn timings. The corpus also carries a reference transcript for every call, which serves two purposes: the taggers and the intent model can be measured on it independently of recognition error, and the recogniser itself can be scored against it by word error rate.
 
-**5.2 Scam intent**
+**5.2 Fraud entity tagging**
+
+Two taggers share one tokeniser, one label space and one scoring procedure. A linear chain conditional random field, implemented in the project rather than taken from a library, tags seven entity types in BIO form: OTP, BANK_ENTITY, AUTHORITY_CLAIM, THREAT_DEADLINE, PAYMENT_HANDLE, PERSONAL_INFO_REQ and MONEY_AMOUNT. Its features are the token, its shape, prefixes and suffixes, the neighbouring tokens, and the token's language tag. It is trained with L2 regularisation 0.5 for 200 iterations on the train split. Its neural counterpart is a BiLSTM with a CRF output layer whose input is the word embedding concatenated with small embeddings of the same symbolic features, so that the comparison between the two changes only how a labelling is scored. Entity counts per type, divided by the number of turns so far, become six density features.
+
+**5.3 Scam intent**
 
 Each turn is represented by TF-IDF over word unigrams and bigrams together with character 3 to 5 grams inside word boundaries. The character n grams are what let the classifier survive the spelling variation of romanised Hindi. A class balanced logistic regression with C = 4.0 gives a per turn probability; the call score is 0.6 times the maximum turn score plus 0.4 times the mean. A lexicon rule baseline that counts fraud words is kept for comparison. The intent score, the peak turn score and an urgency word density leave this branch, nine numbers in all with the entity densities.
 
@@ -78,17 +82,17 @@ The code mixing index of a call is one minus the share of the dominant language 
 
 **8. Fusion and Streaming Decision**
 
-The twenty five features from the four branches enter a logistic regression with C = 0.7 and balanced class weights, wrapped in isotonic calibration so that the output can be read as a probability. The fusion layer is fitted on the dev split, never on train, because it stacks on top of branch outputs and fitting it on rows the branches trained on would feed it in sample predictions that never occur at test time.
+The twenty five features from the four branches enter a logistic regression with C = 0.7 and balanced class weights, wrapped in isotonic calibration so that the output can be read as a probability; a histogram gradient boosting fusion is trained on the same rows as the non linear alternative. The fusion layer is fitted on the dev split, never on train, because it stacks on top of branch outputs and fitting it on rows the branches trained on would feed it in sample predictions that never occur at test time.
 
-After each caller turn the features are recomputed over all caller audio and text so far, the probability is produced, and a band is assigned at 0.35, 0.65 and 0.85. Time to detection is the end time of the first caller turn at which the probability reaches 0.65. Reasons are generated per turn from the sign and size of each branch's contribution, in plain language, for example "the voice scores 0.99 on the synthetic speech detector" or "a request for an OTP followed a threat with a deadline".
+After each caller turn the features are recomputed over all caller audio and text so far, the probability is produced, and a band is assigned at 0.35, 0.65 and 0.85. Time to detection is the end time of the first caller turn at which the probability reaches 0.65. The evidence panel is generated per turn from the sign and size of each branch's contribution, in plain language: the entity spans found, the phrases that raised intent, the voice cues (detector score, jitter, shimmer, consistency), and the coercion step the call has reached, for example "the voice scores 0.99 on the synthetic speech detector" or "a request for an OTP followed a threat with a deadline". A warning that explains itself is acted on; a bare number is not.
 
 **9. Evaluation Plan**
 
 Every reported number comes from the test split or from data outside the training distribution.
 
 - Ablation. Four arms are fitted on the same 120 dev calls and scored on the same 120 test calls: audio only (8 voice features), text only (9 intent features), late fusion (one calibrated score per branch, then a logistic layer), and full (all 25). AUC, F1, accuracy and EER are reported overall, per cell, and on the hard subset of lexically mild scams against benign calls written to sound like scams.
-- Voice branch. EER for each front end and back end on the 310 test clips of the pair set, under clean, G.711 mu law, G.711 A law and GSM 06.10 conditions, read next to the confound audit table.
-- Entity recognition. Precision, recall and F1 with exact span matching, per type.
+- Voice branch. EER and minimum t-DCF for each front end and back end on the 310 test clips of the pair set, under clean, G.711 mu law, G.711 A law and GSM 06.10 conditions, read next to the confound audit table.
+- Entity recognition. Precision, recall and F1 with exact span matching, per type, for the CRF and the BiLSTM-CRF; word error rate of the recogniser against the reference transcript.
 - Intent. AUC and F1 for the rule baseline and the TF-IDF model.
 - Generalisation. Recall at 0.65 and cross domain AUC of the intent model on 1,413 real recorded robocalls, with the project's own benign calls as controls.
 - Time to detection. Median, 90th percentile and turns to alert on the test scam calls, per scenario.
@@ -98,7 +102,7 @@ Every reported number comes from the test split or from data outside the trainin
 
 **10. Tools and Environment**
 
-Python with NumPy and SciPy for signal processing; scikit-learn for logistic regression, isotonic calibration, Gaussian mixtures and gradient boosting; the CRF, cepstral front ends, pitch tracker, syllable segmenter and dialogue act HMM written in the project; edge-tts for neural voices; FFmpeg for the GSM codec, with G.711 implemented directly; Flask for the console. Training and evaluation run on a Google Colab CPU runtime with every stage checkpointed to Drive; the console runs on a laptop with 8 GB of RAM. The corpus manifest records a fingerprint of the grammar and the pair manifest a build version, and the runner refuses to reuse a corpus or pair set that does not match the checked out code, so a change to the templates or the matching always reaches the models.
+Python with NumPy and SciPy for signal processing; scikit-learn for logistic regression, isotonic calibration, Gaussian mixtures and gradient boosting; PyTorch for the RawNet style detector, the TDNN speaker embedder and the BiLSTM-CRF tagger; OpenAI Whisper for transcription; the CRF, cepstral front ends, pitch tracker, syllable segmenter and dialogue act HMM written in the project; edge-tts for neural voices; FFmpeg for the GSM codec, with G.711 implemented directly; Flask for the console. Training and evaluation run on a Google Colab CPU runtime with every stage checkpointed to Drive; the console runs on a laptop with 8 GB of RAM. The corpus manifest records a fingerprint of the grammar and the pair manifest a build version, and the runner refuses to reuse a corpus or pair set that does not match the checked out code, so a change to the templates or the matching always reaches the models.
 
 **11. References**
 

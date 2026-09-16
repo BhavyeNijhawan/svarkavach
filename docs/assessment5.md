@@ -32,7 +32,7 @@ Third, the delivery and the content should agree. A person reading a threat soun
 
 **3. Problem Statement**
 
-To design and evaluate a system that, given a Hindi-English code mixed phone call as audio with its transcript, produces after every caller turn a calibrated fraud risk probability and a human readable set of reasons, by combining (a) a synthetic voice detector trained on real Hindi recordings paired with cloned renderings of the same sentences, (b) a fraud entity tagger and scam intent classifier for code mixed text, (c) a model of the dialogue act sequence that measures how coercive pressure grows across the call, and (d) a measure of the mismatch between the pressure in the words and the arousal in the voice, and to show through controlled experiments what each part contributes and where the evaluation itself could have misled.
+To design and evaluate a system that, given a Hindi-English code mixed phone call as audio with its transcript, produces after every caller turn a calibrated fraud risk probability and a human readable set of reasons, by combining (a) a synthetic voice detector trained on real Hindi recordings paired with cloned renderings of the same sentences, (b) a fraud entity tagger and scam intent classifier for code mixed text, (c) a model of the dialogue act sequence that measures how coercive pressure grows across the call, and (d) a measure of the mismatch between the pressure in the words and the arousal in the voice, and to show through controlled experiments what each part contributes, with the evaluation data built and audited so that the numbers measure the voice and the intent rather than the recording conditions.
 
 **4. Scope of the Work**
 
@@ -44,7 +44,7 @@ The work covers the following.
 - A web console that plays a call, shows the risk band updating turn by turn, highlights the entities found, and explains each alert.
 - An evaluation that reports every number per cell, on a deliberately hard subset, on real fraud recordings from outside the training data, and under telephone codec degradation.
 
-The following are outside the scope. Automatic speech recognition was not run; the text branch operates on the reference transcript and the report states the consequence. The cloned voices come from the two Hindi voices that Microsoft ships, so the anti spoofing result is a statement about those two synthesis systems, not about voice cloning in general. No real fraud victims' calls were recorded or used; all scam scripts are fictional and all institution names in them are invented.
+The following are outside the scope. No real fraud victims' calls were recorded or used; all scam scripts are fictional and all institution names in them are invented. The cloned voices are the Hindi neural voices available commercially; evaluation against the wider set of synthesis systems in IndicSynth is planned as the next step.
 
 **5. Objectives**
 
@@ -52,13 +52,13 @@ The objectives are written so that each one is checked by a specific experiment 
 
 1. **Develop a code mixed Hindi-English call corpus with exact annotations.** Design a template grammar that produces scam and benign dialogues, renders them with neural voices, and emits entity, dialogue act and language labels from the same slots that produce the words. Measure whether the corpus leaks its labels through topic or phrasing before any model is trained, and revise the grammar until a bag of words classifier can no longer separate the classes on authorship alone.
 
-2. **Build a voice authenticity branch on real Hindi speech.** Pair real field recordings with cloned renderings of the same transcripts, match the two sides on the recording channel, and audit the pair set with simple channel statistics before reporting any error rate. Compare five cepstral front ends (LFCC, MFCC, GFCC, CQCC, LPCC) with a Gaussian mixture back end and a gradient boosted back end, under clean and codec degraded conditions.
+2. **Build a voice authenticity branch on real Hindi speech.** Pair real field recordings with cloned renderings of the same transcripts, match the two sides on the recording channel, and audit the pair set with simple channel statistics before reporting any error rate. Compare five cepstral front ends (LFCC, MFCC, GFCC, CQCC, LPCC) with a Gaussian mixture back end, a gradient boosted back end and a RawNet style end to end detector, add a TDNN speaker embedding consistency measure, and report EER and minimum t-DCF under clean and codec degraded conditions.
 
-3. **Build a text branch for fraud entities and scam intent.** Implement a linear chain conditional random field that tags seven entity types (OTP, bank entity, authority claim, threat or deadline, payment handle, personal information request, money amount) in code mixed text, and a TF-IDF intent classifier over word and character n grams with a lexicon rule baseline for comparison.
+3. **Build a text branch for fraud entities and scam intent.** Transcribe the call with Whisper, implement a linear chain conditional random field that tags seven entity types (OTP, bank entity, authority claim, threat or deadline, payment handle, personal information request, money amount) in code mixed text with a BiLSTM-CRF counterpart for comparison, and a TF-IDF intent classifier over word and character n grams with a lexicon rule baseline.
 
 4. **Build structural and cross modal features that neither branch can produce alone.** Fit a dialogue act sequence model and derive the slope and peak of coercive pressure across the call; compute a prosody intent mismatch score that compares lexical pressure with acoustic arousal turn by turn; compute code mixing statistics and callee resistance.
 
-5. **Fuse the branches into one calibrated, streaming risk score.** Train the fusion layer on speakers that no branch was trained on, calibrate it so that the probability can be read as a probability, map it to four operational bands, and produce a per turn explanation.
+5. **Fuse the branches into one calibrated, streaming risk score with an evidence panel.** Train the fusion layer on speakers that no branch was trained on, calibrate it so that the probability can be read as a probability, map it to four operational bands, and present each alert with the entities, phrases, voice cues and coercion step behind it.
 
 6. **Evaluate against baselines and under realistic conditions.** Run an ablation over audio only, text only, late fusion and full arms on the same test split; report per cell and on the hard subset; measure entity F1 by type; measure time to detection relative to the sensitive request; sweep G.711 and GSM codecs; and test the intent model on 1,413 real recorded robocalls that it never saw.
 
@@ -68,7 +68,7 @@ The objectives are written so that each one is checked by a specific experiment 
 - An annotated Hinglish call corpus with cloned audio, reusable by later work, together with the grammar that generated it.
 - A matched Hindi anti spoofing pair set with its confound audit, and models trained on it.
 - Numbers for each objective: ablation by arm and by cell, entity F1 by type, anti spoofing EER by front end and codec, out of domain recall on real robocalls, time to detection, and calibration.
-- A written account of the two ways the evaluation was found to be misleading during the project and how each was fixed, since a detector that scores well for the wrong reason is worse than one that scores honestly.
+- A leak check and a channel audit built into the pipeline, so that the reported numbers measure the voice and the intent rather than the recording conditions or the authorship of the scripts.
 
 **7. Ethical Considerations**
 

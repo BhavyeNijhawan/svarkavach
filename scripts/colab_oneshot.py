@@ -76,7 +76,7 @@ print("at:", head)
 # ----------------------------------------------------------------- install
 subprocess.run([sys.executable, "-m", "pip", "install", "-q", "-e", "."])
 subprocess.run([sys.executable, "-m", "pip", "install", "-q",
-                "edge-tts", "indic-transliteration", "soundfile"])
+                "edge-tts", "indic-transliteration", "soundfile", "openai-whisper"])
 
 # Drop anything already imported, so a re-run in the same session picks up the
 # code that was just synced rather than the copy sitting in sys.modules.
