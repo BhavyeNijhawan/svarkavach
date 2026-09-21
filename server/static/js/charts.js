@@ -596,10 +596,18 @@ export function detCurve(host, cfg) {
   // chance line
   el("line", { class: "ref-line", x1: x(0), y1: y(0), x2: x(cfg.maxX ?? 1), y2: y(cfg.maxY ?? 1) }, g);
 
+  // Clip the curves to the plot. A DET curve runs to (1, 0) and (0, 1), and
+  // with maxX and maxY at 0.6 the part outside the axes was drawn across the
+  // rest of the page; the chart's svg has overflow visible for its labels.
+  const clipId = `det-clip-${Math.random().toString(36).slice(2, 8)}`;
+  const clip = el("clipPath", { id: clipId }, g);
+  el("rect", { x: 0, y: 0, width: iw, height: ih }, clip);
+  const plot = el("g", { "clip-path": `url(#${clipId})` }, g);
+
   (cfg.series || []).forEach((s, i) => {
     const color = s.color || seriesColor(i);
     const d = s.points.map((p, j) => `${j ? "L" : "M"}${x(p[0]).toFixed(2)},${y(p[1]).toFixed(2)}`).join("");
-    el("path", { class: "series-line", d, stroke: color }, g);
+    el("path", { class: "series-line", d, stroke: color }, plot);
     if (s.eer !== undefined && s.eer !== null) {
       el("circle", { class: "dot", cx: x(s.eer), cy: y(s.eer), r: 4.5, fill: color }, g);
     }

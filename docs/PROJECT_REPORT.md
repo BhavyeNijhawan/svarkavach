@@ -1,8 +1,28 @@
+::: {custom-style="TitlePage"}
+PROJECT REPORT
+:::
+
 # Detecting Voice-Cloned Fraud Calls in Hinglish by Fusing Anti-Spoofing, Scam-Intent and Prosody-Intent Mismatch Cues
 
-**Project: SwarKavach**
+::: {custom-style="TitleBlock"}
+SwarKavach: a fused, per-turn fraud-call detector for code-mixed Hindi-English telephone speech
 
----
+Submitted by
+
+**Bhavye Nijhawan**, Reg. No. 23BAI0100
+
+BCSE419L Speech and Language Processing Laboratory
+
+Vellore Institute of Technology
+
+September 2026
+
+Repository: https://github.com/BhavyeNijhawan/svarkavach
+:::
+
+```{=openxml}
+<w:p><w:r><w:br w:type="page"/></w:r></w:p>
+```
 
 ## Abstract
 
@@ -32,6 +52,24 @@ References
 - Figure 3. Construction of the matched anti-spoofing pair set
 - Figure 4. Per-turn streaming decision and time-to-detection measurement
 - Figure 5. Where each fusion feature comes from
+- Figure 6. Console: call analysis with the evidence panel
+- Figure 7. Console: live monitor, corpus browser and system view
+- Figure 8. Results lab: headline ablation as displayed in the console
+- Figure 9. Ablation of the four arms, AUC and F1
+- Figure 10. Per-cell accuracy of each arm
+- Figure 11. Arm comparison on the hard subset
+- Figure 12. Results lab: entity recognition and intent as displayed
+- Figure 13. Entity recognition F1 by type
+- Figure 14. Scam intent, rule baseline against TF-IDF
+- Figure 15. Results lab: calibration as displayed
+- Figure 16. Calibration reliability diagram
+- Figure 17. Results lab: anti-spoofing EER and DET curves as displayed
+- Figure 18. Anti-spoofing EER by front end, back end and codec
+- Figure 19. Confound audit of the pair set, raw and conditioned
+- Figure 20. Out-of-domain recall on real robocalls
+- Figure 21. Results lab: channel robustness and time to detection as displayed
+- Figure 22. Time to detection, distribution and by scenario
+- Figure 23. Channel robustness of the full and audio-only arms
 
 ## List of Tables
 
@@ -184,7 +222,7 @@ AUC is the probability that a random scam call scores above a random benign one.
 
 | Item | Specification |
 |---|---|
-| Training and evaluation | Google Colab CPU runtime, Python 3.13; no GPU |
+| Training and evaluation | Google Colab runtime (Tesla T4 available), Python 3.13; the reported models train on CPU |
 | Console and development | Laptop, Windows 11, 7.9 GB RAM, Python 3.11.9 |
 | Numerical stack | NumPy 2.4.3, SciPy 1.17.1, scikit-learn 1.9.0, PyTorch 2.11.0 CPU |
 | Speech synthesis | edge-tts 7.2.8, Microsoft neural voices (hi-IN Madhur, hi-IN Swara, en-IN Prabhat, Neerja, NeerjaExpressive) |
@@ -315,6 +353,14 @@ stateDiagram-v2
 **Figure 4.** Per-turn streaming decision and time-to-detection measurement.
 
 A logistic regression with C = 0.7 and balanced class weights, wrapped in isotonic calibration, produces $p_k$ from the 25-dimensional vector after each caller turn; a histogram gradient-boosting fusion (220 iterations, depth 4) is trained alongside it as the non-linear alternative. It is fitted on dev because it stacks on branch outputs; fitting it on train would feed it in-sample predictions that never occur at test time. The evidence panel is generated per turn from the sign and size of each branch's contribution: the entity spans found, the phrases that raised intent, the voice cues (detector score, jitter, shimmer, consistency), and the coercion step the call has reached, so that a warning explains itself rather than showing a number.
+
+![](docs/figures/shot_analysis.png)
+
+**Figure 6.** Console: call analysis of a cloned loan-approval scam. Left, the transcript with entity spans and dialogue acts; right, the verdict gauge, the plain-language reasons, the detected entities; below, exact Shapley contributions per feature and the prosody-against-lexical-pressure trace.
+
+![](docs/figures/shot_monitor.png)
+
+**Figure 7.** Console: the live monitor, which streams the risk band turn by turn. The corpus browser and the system view are shown in Appendix B.
 
 ```mermaid
 flowchart LR
@@ -450,6 +496,14 @@ Two checks run before any model is trained. A pure-Python bag-of-words classifie
 
 The full arm reaches the highest AUC and halves the equal error rate of the text-only arm, from 0.033 to 0.017. The audio-only arm sits near chance by design: the corpus draws the voice label independently of the scam label, so a branch that reads only the voice cannot predict the content. Its role is as a modifier inside the fused score, not as a detector on its own.
 
+![](docs/figures/shot_ablation.png)
+
+**Figure 8.** Results lab: the headline tiles and the ablation as displayed in the console, read from `ablation_results.json`.
+
+![](docs/figures/chart_ablation.png)
+
+**Figure 9.** Ablation of the four arms on the test split, AUC and F1.
+
 ## 7.2 Leak check
 
 After the grammar rules of Section 5.3, the pre-training bag-of-words check gives AUC 0.990 on the whole corpus and 0.947 on the hard subset. What remains separable is the phenomenon itself: a scam call threatens and asks for a code, and a bag of words finds that.
@@ -467,6 +521,10 @@ After the grammar rules of Section 5.3, the pre-training bag-of-words check give
 
 The full arm is perfect on three cells and misses two of thirty cloned scams, both in the lexically mild style. The audio-only row classifies nearly every call as benign, which is what independence of voice and content looks like.
 
+![](docs/figures/chart_percell.png)
+
+**Figure 10.** Per-cell accuracy of each arm at threshold 0.65.
+
 **Table 7.** Arm comparison on the hard subset: 13 lexically mild scams against 41 hard negatives.
 
 | Arm | AUC | F1 | Recall | Precision |
@@ -477,6 +535,10 @@ The full arm is perfect on three cells and misses two of thirty cloned scams, bo
 | Full | 0.998 | 0.917 | 0.846 | 1.000 |
 
 This is where the arms have room to differ, and the full arm ranks the hard cases best, 0.998 against 0.993 for text alone, with no false alarms on the 41 benign calls written to sound like scams.
+
+![](docs/figures/chart_hard.png)
+
+**Figure 11.** Arm comparison on the hard subset.
 
 ## 7.4 Intent and entities
 
@@ -497,9 +559,29 @@ The TF-IDF intent model reaches AUC 1.000 and F1 0.976, against AUC 0.913 and re
 
 The types with a fixed surface form are recognised almost perfectly. The two with the most varied wording lose recall rather than precision: the tagger declines to tag what it has not seen, the safer failure for a system that raises alarms.
 
+![](docs/figures/shot_ner_intent.png)
+
+**Figure 12.** Results lab: entity recognition and intent classification as displayed in the console.
+
+![](docs/figures/chart_ner.png)
+
+**Figure 13.** Entity recognition F1 by type, with support.
+
+![](docs/figures/chart_intent.png)
+
+**Figure 14.** Scam intent: rule baseline against the TF-IDF model on the test split.
+
 ## 7.5 Calibration
 
 Brier score 0.011 and ECE 0.015 on the test split. Fifty-one calls fall in the lowest bin (mean 0.003, no scams) and fifty-six in the highest (mean 0.997, all scams); the nine near 0.11 contain one scam, an observed rate that matches the prediction.
+
+![](docs/figures/shot_calibration.png)
+
+**Figure 15.** Results lab: calibration curve and provenance as displayed in the console.
+
+![](docs/figures/chart_calibration.png)
+
+**Figure 16.** Reliability diagram of the fused probability on the test split.
 
 ## 7.6 The voice branch on real speech
 
@@ -514,6 +596,14 @@ Brier score 0.011 and ECE 0.015 on the test split. Fifty-one calls fall in the l
 | LPCC | 0.000 | 0.000 | 0.000 | 0.000 | 0.006 | 0.000 | 0.000 | 0.006 |
 
 Every front end and back end separates real from cloned Hindi speech at an EER under 0.02 on clean and G.711 audio and under 0.04 under GSM, which at 13 kbit/s is the only condition that removes enough detail to cost anything; minimum t-DCF, which penalises the rarer error more heavily, stays at or below 0.019 for every front end with the GMM back end on clean and G.711 audio and reaches 0.058 under GSM, while the boosted back end pays more under GSM (up to 0.23 for LFCC and GFCC). LFCC and LPCC with the GMM back end, the classical pairings, are the most stable across codecs.
+
+![](docs/figures/shot_antispoof.png)
+
+**Figure 17.** Results lab: anti-spoofing EER by front end and back end, and DET curves, as displayed in the console.
+
+![](docs/figures/chart_antispoof.png)
+
+**Figure 18.** Anti-spoofing EER in percent by front end, back end and codec on the 310 real Hindi test clips.
 
 **Table 10.** Confound audit of the pair set: AUC of each channel statistic alone.
 
@@ -533,6 +623,10 @@ Every front end and back end separates real from cloned Hindi speech at an EER u
 
 The audit is what makes Table 9 readable. It was designed around an early build in which bandwidth, trailing silence and DC offset each separated the classes on their own; the conditioning of Section 5.4 and the matching of Section 4.2 bring all ten statistics to within the audit's threshold, with noise floor, colour, trailing silence and in-band bandwidth at chance. The residual below 300 Hz lies outside the filterbank, and dynamic range reflects spontaneous against read speech rather than the channel. The error rates in Table 9 are therefore measured on the voice.
 
+![](docs/figures/chart_audit.png)
+
+**Figure 19.** Confound audit of the pair set: AUC of each statistic alone, on the raw files and after conditioning, against the audit's stop line.
+
 ## 7.7 Generalisation to real fraud calls
 
 **Table 11.** Out-of-domain recall on 1,413 real robocall recordings, models trained only on the corpus.
@@ -543,6 +637,10 @@ The audit is what makes Table 9 readable. It was designed around an early build 
 | TF-IDF intent | **0.787** | **0.946** | **0.050** |
 
 The intent model, trained only on generated Hinglish calls, recalls nearly four in five real English robocalls at a 5 percent false-alarm rate. The transfer rests on shared fraud vocabulary and on the character n-grams, and it improved directly with the corpus rules of Section 5.3: on the corpus before those rules the same model recalled 0.699 at AUC 0.896 with a 15 percent false-alarm rate. Removing authorship shortcuts made the classifier learn what transfers.
+
+![](docs/figures/chart_robocall.png)
+
+**Figure 20.** Out-of-domain recall, cross-domain AUC and false-alarm rate on 1,413 real robocalls.
 
 ## 7.8 Time to detection and channel robustness
 
@@ -569,6 +667,18 @@ Six turns is before the sensitive request in every flagged call. Digital arrest 
 | GSM 06.10 | 0.9997 | 0.559 |
 
 The fused decision is unchanged under every codec. The audio-only column shows what the channel does to the voice branch on its own: GSM costs it about 0.06 AUC, which the fusion absorbs.
+
+![](docs/figures/shot_robust_ttd.png)
+
+**Figure 21.** Results lab: channel robustness and time to detection as displayed in the console.
+
+![](docs/figures/chart_ttd.png)
+
+**Figure 22.** Time to detection: distribution over the 57 flagged scam calls, and median by scenario.
+
+![](docs/figures/chart_robustness.png)
+
+**Figure 23.** Channel robustness of the full and audio-only arms under each codec.
 
 ## 7.9 Scope of the results
 
@@ -597,6 +707,8 @@ The technical implication is that the four signals are complementary in the way 
 
 ---
 
+---
+
 # References
 
 Ma, Z., Wang, P., Huang, M., Wang, J., Wu, K., Lv, X., Pang, Y., Yang, Y., Tang, W., & Kang, Y. (2025). *TeleAntiFraud-28k: An audio-text slow-thinking dataset for telecom fraud detection*. arXiv. https://arxiv.org/abs/2503.24115
@@ -610,3 +722,15 @@ Wang, X., Delgado, H., Tak, H., Jung, J., Shim, H., Todisco, M., Kukanov, I., Li
 Yi, J., Wang, C., Tao, J., Zhang, X., Zhang, C. Y., & Zhao, Y. (2023). *Audio deepfake detection: A survey*. arXiv. https://arxiv.org/abs/2308.14970
 
 Zhu, Y., Koppisetti, S., Tran, T., & Bharaj, G. (2024). SLIM: Style-linguistics mismatch model for generalized audio deepfake detection. In *Advances in Neural Information Processing Systems 37 (NeurIPS 2024)*. https://arxiv.org/abs/2407.18517
+
+---
+
+# Appendix B. Console views
+
+![](docs/figures/shot_corpus.png)
+
+**Figure B1.** The corpus browser: every call with its cell, split, scenario and duration.
+
+![](docs/figures/shot_system.png)
+
+**Figure B2.** The system view: loaded models, back ends and thresholds in force.

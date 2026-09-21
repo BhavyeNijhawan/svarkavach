@@ -90,6 +90,10 @@ function applyTheme(t) {
 function initTheme() {
   let t = "dark";
   try { t = localStorage.getItem("sk-theme") || "dark"; } catch { /* ignore */ }
+  // ?theme=light|dark in the URL wins, so a link can open the console in a
+  // known theme (screenshots for a document, a projector that washes out dark).
+  const forced = new URLSearchParams(location.search).get("theme");
+  if (forced === "light" || forced === "dark") t = forced;
   applyTheme(t);
   document.getElementById("theme-toggle").addEventListener("click", () => {
     const now = document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark";
