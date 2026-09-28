@@ -8,7 +8,10 @@ import sys
 from pathlib import Path
 
 import docx
+from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_BREAK
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
 from docx.shared import Inches, Pt
 
 src = Path(sys.argv[1])
@@ -70,6 +73,36 @@ def para(text="", size=BODY_PT, bold=False, align=None, before=0, after=1, inden
     return p
 
 
+def add_table(rows):
+    """A pipe table, ruled and full width, at one point under body size."""
+    tb = d.add_table(rows=len(rows), cols=len(rows[0]))
+    tb.alignment = WD_TABLE_ALIGNMENT.CENTER
+    tbl_pr = tb._tbl.tblPr
+    w = OxmlElement("w:tblW"); w.set(qn("w:type"), "pct"); w.set(qn("w:w"), "5000")
+    tbl_pr.append(w)
+    borders = OxmlElement("w:tblBorders")
+    for edge in ("top", "left", "bottom", "right", "insideH", "insideV"):
+        e = OxmlElement(f"w:{edge}")
+        e.set(qn("w:val"), "single"); e.set(qn("w:sz"), "4"); e.set(qn("w:color"), "808080")
+        borders.append(e)
+    tbl_pr.append(borders)
+    for i, row in enumerate(rows):
+        for j, text in enumerate(row):
+            cell = tb.cell(i, j)
+            cell.text = ""
+            p = cell.paragraphs[0]
+            pf = p.paragraph_format
+            pf.space_before, pf.space_after, pf.line_spacing = Pt(1), Pt(1), 1.0
+            p.alignment = WD_ALIGN_PARAGRAPH.LEFT if j == 0 else WD_ALIGN_PARAGRAPH.CENTER
+            add_runs(p, text, size=BODY_PT - 1, bold_all=(i == 0))
+            if i == 0:
+                tc_pr = cell._tc.get_or_add_tcPr()
+                shd = OxmlElement("w:shd")
+                shd.set(qn("w:val"), "clear"); shd.set(qn("w:color"), "auto"); shd.set(qn("w:fill"), "EDEDED")
+                tc_pr.append(shd)
+    para("", after=3)
+
+
 lines = src.read_text(encoding="utf-8").splitlines()
 
 # ---- header block: the leading lines up to the first bold title line
@@ -94,10 +127,14 @@ i += 1
 # ---- body
 bullets = []
 numbers = []
+table_rows = []
 
 
 def flush_lists():
-    global bullets, numbers
+    global bullets, numbers, table_rows
+    if table_rows:
+        add_table(table_rows)
+        table_rows = []
     if bullets:
         p = para(indent=0.35, after=1)
         for k, b in enumerate(bullets):
@@ -120,6 +157,11 @@ while i < len(lines):
     i += 1
     if not s:
         flush_lists()
+        continue
+    if s.startswith("|") and s.endswith("|"):
+        cells = [c.strip() for c in s.strip("|").split("|")]
+        if not all(set(c) <= set("-: ") for c in cells):
+            table_rows.append(cells)
         continue
     m = re.match(r"!\[\]\(([^)]+)\)", s)
     if m:
