@@ -35,7 +35,8 @@ REF = ROOT / "docs" / "_reference.docx"
 
 FONT = "Cambria"
 BLACK = RGBColor(0, 0, 0)
-TEXT_WIDTH_IN = 7.5          # letter width minus two 0.5 inch margins
+TEXT_WIDTH_IN = 6.2
+MAX_HEIGHT_IN = 2.8        # a figure may not own a page          # letter width minus two 0.5 inch margins
 
 
 # ------------------------------------------------------------- mermaid
@@ -67,11 +68,8 @@ def replace_block(m: re.Match) -> str:
 
 body = re.sub(r"```mermaid\n(.*?)```", replace_block, src, flags=re.S)
 appendix.sort()
-body += ("\n\n# Appendix C. Diagram sources (Mermaid)\n\n"
-         "Figures 1 to 5 are Mermaid diagrams. The sources below reproduce "
-         "them exactly and render in any Mermaid viewer.\n")
-for n, title, code in appendix:
-    body += f"\n## Figure {n}. {title}\n\n```\n{code}\n```\n"
+# Mermaid sources stay in the markdown, which is in the repository, rather
+# than adding pages to a report that has a page budget
 # the repository link closes the document
 body += "\n\n---\n\n" + (ROOT / "docs" / "_repo_section.md").read_text(encoding="utf-8")
 TMP.write_text(body, encoding="utf-8", newline="\n")
@@ -104,24 +102,24 @@ def set_font(style, size=None, bold=None, italic=None, color=BLACK, name=FONT):
 subprocess.run(["pandoc", "-o", str(REF), "--print-default-data-file", "reference.docx"], check=True)
 ref = docx.Document(str(REF))
 st = ref.styles
-set_font(st["Normal"], 11)
-st["Normal"].paragraph_format.space_after = Pt(6)
-st["Normal"].paragraph_format.line_spacing = 1.08
+set_font(st["Normal"], 9.5)
+st["Normal"].paragraph_format.space_after = Pt(4)
+st["Normal"].paragraph_format.line_spacing = 1.0
 for name in ("Body Text", "First Paragraph", "Compact"):
     if name in [s.name for s in st]:
-        set_font(st[name], 11)
-        st[name].paragraph_format.space_after = Pt(6)
-        st[name].paragraph_format.line_spacing = 1.08
-set_font(st["Title"], 20, bold=True)
+        set_font(st[name], 9.5)
+        st[name].paragraph_format.space_after = Pt(4)
+        st[name].paragraph_format.line_spacing = 1.0
+set_font(st["Title"], 19, bold=True)
 st["Title"].paragraph_format.alignment = WD_ALIGN_PARAGRAPH.CENTER
-h = st["Heading 1"]; set_font(h, 16, bold=True); h.paragraph_format.space_before = Pt(18); h.paragraph_format.space_after = Pt(8); h.paragraph_format.page_break_before = True
-h = st["Heading 2"]; set_font(h, 13, bold=True); h.paragraph_format.space_before = Pt(14); h.paragraph_format.space_after = Pt(4)
-h = st["Heading 3"]; set_font(h, 11.5, bold=True, italic=False); h.paragraph_format.space_before = Pt(10); h.paragraph_format.space_after = Pt(3)
+h = st["Heading 1"]; set_font(h, 13, bold=True); h.paragraph_format.space_before = Pt(12); h.paragraph_format.space_after = Pt(5); h.paragraph_format.page_break_before = False
+h = st["Heading 2"]; set_font(h, 11, bold=True); h.paragraph_format.space_before = Pt(9); h.paragraph_format.space_after = Pt(3)
+h = st["Heading 3"]; set_font(h, 10, bold=True, italic=False); h.paragraph_format.space_before = Pt(7); h.paragraph_format.space_after = Pt(2)
 for name in ("Heading 4", "Heading 5", "Heading 6"):
-    set_font(st[name], 11, bold=True, italic=False)
+    set_font(st[name], 9.5, bold=True, italic=False)
 for name in ("Source Code", "Verbatim Char"):
     if name in [s.name for s in st]:
-        set_font(st[name], 8.5, name="Consolas")
+        set_font(st[name], 7.5, name="Consolas")
 if "Caption" in [s.name for s in st]:
     set_font(st["Caption"], 9.5, italic=False)
 for sec in ref.sections:
@@ -168,7 +166,7 @@ for t in d.tables:
                 p.paragraph_format.space_before = Pt(1)
                 p.paragraph_format.line_spacing = 1.0
                 for r in p.runs:
-                    r.font.size = Pt(9)
+                    r.font.size = Pt(8)
                     r.font.name = FONT
                     if i == 0:
                         r.font.bold = True
@@ -186,8 +184,8 @@ for p in d.paragraphs:
         for inl in pics:
             ext = inl.find(qn("wp:extent"))
             cx, cy = int(ext.get("cx")), int(ext.get("cy"))
-            if cx > TEXT_WIDTH_IN * emu_per_in:
-                k = TEXT_WIDTH_IN * emu_per_in / cx
+            k = min(TEXT_WIDTH_IN * emu_per_in / cx, MAX_HEIGHT_IN * emu_per_in / cy, 1.0)
+            if k < 1.0:
                 ext.set("cx", str(int(cx * k))); ext.set("cy", str(int(cy * k)))
                 for a in inl.iter(qn("a:ext")):
                     a.set("cx", str(int(cx * k))); a.set("cy", str(int(cy * k)))
@@ -200,10 +198,10 @@ for p in d.paragraphs:
                   and p.runs and p.runs[0].bold)
     if is_caption:
         p.alignment = WD_ALIGN_PARAGRAPH.CENTER if txt.startswith("Figure") else WD_ALIGN_PARAGRAPH.LEFT
-        p.paragraph_format.space_after = Pt(10 if txt.startswith("Figure") else 3)
+        p.paragraph_format.space_after = Pt(7 if txt.startswith("Figure") else 2)
         p.paragraph_format.keep_with_next = txt.startswith("Table")
         for r in p.runs:
-            r.font.size = Pt(9.5)
+            r.font.size = Pt(8.5)
 
 # title page paragraphs (the custom-style divs)
 for p in d.paragraphs:
